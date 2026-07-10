@@ -5,6 +5,11 @@ export interface IReaction {
   emoji: string;
 }
 
+export interface IReadReceipt {
+  userId: mongoose.Types.ObjectId;
+  readAt: Date;
+}
+
 export interface IPollOption {
   text: string;
   votes: mongoose.Types.ObjectId[];
@@ -30,6 +35,10 @@ export interface IMessage extends Document {
   deletedFor: mongoose.Types.ObjectId[];
   deletedForEveryone: boolean;
   reactions: IReaction[];
+  readBy: IReadReceipt[];
+  isEncrypted?: boolean;
+  encAesKey?: string;
+  iv?: string;
   expiresAt?: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -39,6 +48,14 @@ const reactionSchema = new Schema<IReaction>(
   {
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
     emoji: { type: String, required: true },
+  },
+  { _id: false }
+);
+
+const readReceiptSchema = new Schema<IReadReceipt>(
+  {
+    userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
+    readAt: { type: Date, default: Date.now },
   },
   { _id: false }
 );
@@ -83,6 +100,10 @@ const messageSchema = new Schema<IMessage>(
     deletedFor: [{ type: Schema.Types.ObjectId, ref: "User" }],
     deletedForEveryone: { type: Boolean, default: false },
     reactions: [reactionSchema],
+    readBy: [readReceiptSchema],
+    isEncrypted: { type: Boolean, default: false },
+    encAesKey: { type: String },
+    iv: { type: String },
     // TTL index: MongoDB auto-deletes the document when expiresAt is reached.
     // Only set on media messages (image, file, voice). Text/poll messages never expire.
     expiresAt: { type: Date, index: { expires: 0 } },

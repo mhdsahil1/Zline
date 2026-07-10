@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Phone, PhoneOff, Video, VideoOff, Mic, MicOff } from "lucide-react";
+import { Phone, PhoneOff, Video, VideoOff, Mic, MicOff, MonitorUp } from "lucide-react";
 
 // Google public STUN servers — free, work in most networks
 const RTC_CONFIG: RTCConfiguration = {
@@ -32,10 +32,12 @@ export default function CallModal({ socket, currentUserId, currentUserName }: Ca
   const [remoteId, setRemoteId] = useState("");
   const [isMuted, setIsMuted] = useState(false);
   const [isCameraOff, setIsCameraOff] = useState(false);
+  const [isScreenSharing, setIsScreenSharing] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   const peerRef = useRef<RTCPeerConnection | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
+  const screenStreamRef = useRef<MediaStream | null>(null);
   const remoteStreamRef = useRef<MediaStream | null>(null);
   const pendingOfferRef = useRef<RTCSessionDescriptionInit | null>(null);
   const iceQueueRef = useRef<RTCIceCandidateInit[]>([]);
@@ -48,6 +50,8 @@ export default function CallModal({ socket, currentUserId, currentUserName }: Ca
   const cleanup = useCallback(() => {
     localStreamRef.current?.getTracks().forEach((t) => t.stop());
     localStreamRef.current = null;
+    screenStreamRef.current?.getTracks().forEach((t) => t.stop());
+    screenStreamRef.current = null;
     remoteStreamRef.current = null;
     peerRef.current?.close();
     peerRef.current = null;
@@ -59,6 +63,7 @@ export default function CallModal({ socket, currentUserId, currentUserName }: Ca
     }
     setIsMuted(false);
     setIsCameraOff(false);
+    setIsScreenSharing(false);
     setCallState("idle");
   }, []);
 
@@ -260,10 +265,74 @@ export default function CallModal({ socket, currentUserId, currentUserName }: Ca
     }
   };
 
+  const startScreenShare = async () => {
+    if (!peerRef.current) return;
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true });
+      screenStreamRef.current = stream;
+      const screenTrack = stream.getVideoTracks()[0];
+
+      const senders = peerRef.current.getSenders();
+      const videoSender = senders.find((s) => s.track?.kind === "video");
+
+      if (videoSender) {
+        await videoSender.replaceTrack(screenTrack);
+      }
+
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = stream;
+      }
+
+      setIsScreenSharing(true);
+
+      screenTrack.onended = () => {
+        stopScreenShare();
+      };
+    } catch (err) {
+      console.error("Error sharing screen:", err);
+    }
+  };
+
+  const stopScreenShare = useCallback(async () => {
+    if (!peerRef.current) return;
+    try {
+      const cameraTrack = localStreamRef.current?.getVideoTracks()[0];
+      const senders = peerRef.current.getSenders();
+      const videoSender = senders.find((s) => s.track?.kind === "video");
+
+      if (videoSender && cameraTrack) {
+        await videoSender.replaceTrack(cameraTrack);
+      }
+
+      screenStreamRef.current?.getTracks().forEach((t) => t.stop());
+      screenStreamRef.current = null;
+
+      if (localVideoRef.current && localStreamRef.current) {
+        localVideoRef.current.srcObject = localStreamRef.current;
+      }
+
+      setIsScreenSharing(false);
+    } catch (err) {
+      console.error("Error stopping screen share:", err);
+    }
+  }, []);
+
+  const toggleScreenShare = () => {
+    if (isScreenSharing) {
+      stopScreenShare();
+    } else {
+      startScreenShare();
+    }
+  };
+
   // ── Synchronize stream srcObjects with video DOM nodes ───────────────
   useEffect(() => {
     if (localVideoRef.current) {
-      if (localStreamRef.current) {
+      if (isScreenSharing && screenStreamRef.current) {
+        if (localVideoRef.current.srcObject !== screenStreamRef.current) {
+          localVideoRef.current.srcObject = screenStreamRef.current;
+        }
+      } else if (localStreamRef.current) {
         if (localVideoRef.current.srcObject !== localStreamRef.current) {
           localVideoRef.current.srcObject = localStreamRef.current;
         }
@@ -271,7 +340,7 @@ export default function CallModal({ socket, currentUserId, currentUserName }: Ca
         localVideoRef.current.srcObject = null;
       }
     }
-  }, [callState, callType]);
+  }, [callState, callType, isScreenSharing]);
 
   useEffect(() => {
     if (remoteVideoRef.current) {
@@ -490,12 +559,26 @@ export default function CallModal({ socket, currentUserId, currentUserName }: Ca
                   {callType === "video" && (
                     <button
                       onClick={toggleCamera}
+                      disabled={isScreenSharing}
                       className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
                         isCameraOff ? "bg-red-600 hover:bg-red-700" : "bg-zinc-700 hover:bg-zinc-600"
-                      }`}
+                      } ${isScreenSharing ? "opacity-50 cursor-not-allowed" : ""}`}
                       title={isCameraOff ? "Turn on camera" : "Turn off camera"}
                     >
                       {isCameraOff ? <VideoOff className="w-5 h-5 text-white" /> : <Video className="w-5 h-5 text-white" />}
+                    </button>
+                  )}
+
+                  {/* Screen Share (video only) */}
+                  {callType === "video" && (
+                    <button
+                      onClick={toggleScreenShare}
+                      className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors cursor-pointer ${
+                        isScreenSharing ? "bg-blue-600 hover:bg-blue-700 animate-pulse" : "bg-zinc-700 hover:bg-zinc-600"
+                      }`}
+                      title={isScreenSharing ? "Stop sharing screen" : "Share screen"}
+                    >
+                      <MonitorUp className="w-5 h-5 text-white" />
                     </button>
                   )}
 

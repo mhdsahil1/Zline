@@ -4,6 +4,7 @@ import { Message } from "@/lib/models/Message";
 import { Chat } from "@/lib/models/Chat";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
+import mongoose from "mongoose";
 
 const MAX_CHAT_MEDIA_BYTES = 100 * 1024 * 1024; // 100MB per chat
 const MEDIA_EXPIRY_MS = 24 * 60 * 60 * 1000;    // 1 day in milliseconds
@@ -17,42 +18,61 @@ export async function GET(req: Request) {
 
     const { searchParams } = new URL(req.url);
     const receiverId = searchParams.get("receiverId");
+    const chatId = searchParams.get("chatId");
 
-    if (!receiverId) {
+    if (!receiverId && !chatId) {
       return NextResponse.json(
-        { message: "Receiver ID is required" },
+        { message: "Receiver ID or Chat ID is required" },
         { status: 400 }
       );
     }
 
     await connectDB();
 
-    // Find the chat between these two users
-    const chat = await Chat.findOne({
-      users: { $all: [session.user.id, receiverId] },
-    });
+    let chat;
+    if (chatId) {
+      chat = await Chat.findOne({ _id: chatId, users: session.user.id });
+    } else {
+      chat = await Chat.findOne({
+        isGroup: false,
+        users: { $all: [session.user.id, receiverId] },
+      });
+    }
 
     if (!chat) {
       return NextResponse.json([], { status: 200 });
     }
 
-    const messages = await Message.find({ chat: chat._id }).sort({
-      createdAt: 1,
-    });
+    const messages = await Message.find({ chat: chat._id })
+      .populate("sender", "name image")
+      .sort({
+        createdAt: 1,
+      });
 
-    // Mark messages as seen if they were sent by the other user and are not seen yet
+    // Mark messages as seen if they were not sent by the current user and current user is not in readBy yet
     const unseenMessages = messages.filter(
-      (m) => m.sender.toString() === receiverId && m.status !== "seen"
+      (m) => m.sender.toString() !== session.user!.id && 
+             (!m.readBy || !m.readBy.some((r: any) => r.userId.toString() === session.user!.id))
     );
 
     if (unseenMessages.length > 0) {
+      const userObjectId = new mongoose.Types.ObjectId(session.user.id);
       await Message.updateMany(
         { _id: { $in: unseenMessages.map((m) => m._id) } },
-        { $set: { status: "seen" } }
+        {
+          $set: { status: "seen" },
+          $addToSet: { readBy: { userId: userObjectId, readAt: new Date() } },
+        }
       );
       
       // Update the local array to reflect the new status
-      unseenMessages.forEach((m) => (m.status = "seen"));
+      unseenMessages.forEach((m) => {
+        m.status = "seen";
+        if (!m.readBy) m.readBy = [];
+        if (!m.readBy.some((r: any) => r.userId.toString() === session.user!.id)) {
+          m.readBy.push({ userId: userObjectId, readAt: new Date() } as any);
+        }
+      });
     }
 
     return NextResponse.json(messages, { status: 200 });
@@ -73,9 +93,9 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json();
-    const { receiverId, content, type = "text", fileUrl, fileName, fileSize } = body;
+    const { receiverId, chatId, content, type = "text", fileUrl, fileName, fileSize, isEncrypted, encAesKey, iv } = body;
 
-    if (!receiverId) {
+    if (!receiverId && !chatId) {
       return NextResponse.json(
         { message: "Missing required fields" },
         { status: 400 }
@@ -101,14 +121,27 @@ export async function POST(req: Request) {
     await connectDB();
 
     // Find or create chat
-    let chat = await Chat.findOne({
-      users: { $all: [session.user.id, receiverId] },
-    });
-
-    if (!chat) {
-      chat = await Chat.create({
-        users: [session.user.id, receiverId],
+    let chat;
+    if (chatId) {
+      chat = await Chat.findOne({ _id: chatId, users: session.user.id });
+      if (!chat) {
+        return NextResponse.json(
+          { message: "Chat not found or access denied" },
+          { status: 404 }
+        );
+      }
+    } else {
+      chat = await Chat.findOne({
+        isGroup: false,
+        users: { $all: [session.user.id, receiverId] },
       });
+
+      if (!chat) {
+        chat = await Chat.create({
+          users: [session.user.id, receiverId],
+          isGroup: false,
+        });
+      }
     }
 
     // Enforce 100MB per-chat media cap
@@ -142,12 +175,40 @@ export async function POST(req: Request) {
       fileName,
       fileSize,
       expiresAt,
+      isEncrypted: !!isEncrypted,
+      encAesKey,
+      iv,
     });
+
+    const populatedMessage = await Message.findById(newMessage._id).populate("sender", "name image");
 
     chat.latestMessage = newMessage._id;
     await chat.save();
 
-    return NextResponse.json(newMessage, { status: 201 });
+    // Send push notifications to other participants asynchronously
+    const senderName = session.user.name || "Zline User";
+    const notificationTitle = chat.isGroup ? (chat.groupName || "Group Message") : senderName;
+    let notificationBody = content || "";
+    if (type === "image") notificationBody = "📷 Photo";
+    else if (type === "file") notificationBody = "📎 File: " + (fileName || "Attachment");
+    else if (type === "voice") notificationBody = "🎤 Voice message";
+    else if (type === "poll") notificationBody = "📊 Poll: " + (newMessage.poll?.question || "New poll");
+
+    const usersToNotify = chat.users.filter((u: any) => u.toString() !== session.user!.id);
+    if (usersToNotify.length > 0) {
+      import("@/lib/push").then(({ sendPushNotification }) => {
+        sendPushNotification(usersToNotify, {
+          title: notificationTitle,
+          body: notificationBody,
+          icon: "/Fevicon final.svg",
+          data: {
+            chatId: chat._id.toString(),
+          }
+        });
+      }).catch(err => console.error("Web push dispatch error:", err));
+    }
+
+    return NextResponse.json(populatedMessage, { status: 201 });
   } catch (error) {
     console.error("Failed to send message", error);
     return NextResponse.json(
@@ -171,7 +232,23 @@ export async function PATCH(req: Request) {
     }
 
     await connectDB();
-    await Message.findByIdAndUpdate(messageId, { status });
+
+    const update: any = { status };
+
+    // When marking as "seen", also add the user to readBy
+    if (status === "seen") {
+      await Message.findByIdAndUpdate(messageId, {
+        ...update,
+        $addToSet: {
+          readBy: {
+            userId: new mongoose.Types.ObjectId(session.user.id),
+            readAt: new Date(),
+          },
+        },
+      });
+    } else {
+      await Message.findByIdAndUpdate(messageId, update);
+    }
 
     return NextResponse.json({ success: true }, { status: 200 });
   } catch (error) {
