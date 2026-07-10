@@ -1,36 +1,200 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# 💬 Zline
 
-## Getting Started
+A modern real-time messaging platform built with **Next.js**, **Socket.IO**, **MongoDB**, and **WebRTC**, featuring instant messaging, voice/video calling, and a clean responsive interface.
 
-First, run the development server:
+![Next.js](https://img.shields.io/badge/Next.js-14-black)
+![React](https://img.shields.io/badge/React-18-blue)
+![MongoDB](https://img.shields.io/badge/MongoDB-Database-green)
+![Socket.IO](https://img.shields.io/badge/Socket.IO-Realtime-black)
+![WebRTC](https://img.shields.io/badge/WebRTC-Voice%20%26%20Video-orange)
+![License](https://img.shields.io/badge/License-MIT-yellow)
+
+---
+
+## ✨ Features
+
+### 💬 Messaging
+- Real-time messaging
+- One-to-one conversations
+- Online/Offline user status
+- Message timestamps
+- Typing indicators
+- Message delivery in real time
+
+### 📞 Calling
+- Voice Calls
+- Video Calls
+- WebRTC peer-to-peer communication
+- Mute microphone
+- Camera on/off
+- Call rejection
+- Call timeout handling
+
+### 👤 User System
+- Secure authentication
+- User profiles
+- Personal chat rooms
+- Persistent sessions
+
+### 🎨 UI
+- Modern responsive interface
+- Mobile-friendly layout
+- Smooth animations
+- Dark theme
+- Clean chat experience
+
+---
+
+# 🛠 Tech Stack
+
+## Frontend
+
+- Next.js 14
+- React
+- TypeScript
+- Tailwind CSS
+- Lucide Icons
+
+## Backend
+
+- Next.js API Routes
+- Socket.IO
+- MongoDB
+- Mongoose
+
+## Real-Time Communication
+
+- WebRTC
+- STUN Servers
+- Socket.IO Signaling
+
+---
+
+# 📂 Project Structure
+
+```
+zline/
+├── app/
+├── components/
+├── lib/
+├── models/
+├── hooks/
+├── public/
+├── styles/
+├── utils/
+├── types/
+└── ...
+```
+
+---
+
+# 🚀 Getting Started
+
+## Clone Repository
+
+```bash
+git clone https://github.com/yourusername/zline.git
+cd zline
+```
+
+## Install Dependencies
+
+```bash
+npm install
+```
+
+## Configure Environment Variables
+
+Create a `.env.local` file.
+
+```env
+MONGODB_URI=your_database_url
+
+JWT_SECRET=your_secret
+
+NEXT_PUBLIC_SOCKET_URL=http://localhost:3000
+```
+
+---
+
+## Run Development Server
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Visit
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```
+http://localhost:3000
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+---
 
-## Learn More
+# 📷 Screenshots
 
-To learn more about Next.js, take a look at the following resources:
+Add screenshots here.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```
+/screenshots/chat.png
+/screenshots/video-call.png
+/screenshots/mobile.png
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+---
 
-## Deploy on Vercel
+# 🌐 Deployment
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+Deploy easily using
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- Vercel
+- Railway
+- Render
+
+For WebRTC features, HTTPS is required.
+
+---
+
+# 📌 Roadmap
+
+- [x] Authentication
+- [x] Real-time messaging
+- [x] Socket.IO integration
+- [x] Voice calls
+- [x] Video calls
+- [ ] Group chats
+- [ ] Group voice/video calls
+- [ ] Screen sharing
+- [ ] File sharing
+- [ ] Message reactions
+- [ ] Read receipts
+- [ ] Push notifications
+- [ ] End-to-end encryption
+
+---
+
+# 🤝 Contributing
+
+Contributions, issues, and feature requests are welcome.
+
+1. Fork the repository
+2. Create a feature branch
+3. Commit your changes
+4. Push your branch
+5. Open a Pull Request
+
+---
+
+# 📄 License
+
+This project is licensed under the MIT License.
+
+---
+
+# 👨‍💻 Author
+
+**Sahil**
+
+Computer Science (Cyber Security)
+
+Built with ❤️ using Next.js, MongoDB, Socket.IO, and WebRTC.
