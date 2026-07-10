@@ -24,26 +24,44 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
   const { data: session } = useSession();
 
   useEffect(() => {
-    const socketInstance = io({
-      path: "/api/socket/io",
-      addTrailingSlash: false,
-    });
+    let socketInstance: Socket | null = null;
 
-    socketInstance.on("connect", () => {
-      setIsConnected(true);
-      if (session?.user?.id) {
-        socketInstance.emit("join", session.user.id);
+    const initSocket = async () => {
+      try {
+        await fetch("/api/socket/io");
+      } catch (error) {
+        console.error("Socket initialization failed", error);
       }
-    });
 
-    socketInstance.on("disconnect", () => {
-      setIsConnected(false);
-    });
+      socketInstance = io({
+        path: "/api/socket/io",
+        addTrailingSlash: false,
+      });
 
-    setSocket(socketInstance);
+      socketInstance.on("connect", () => {
+        console.log("Socket connected!");
+        setIsConnected(true);
+        if (session?.user?.id) {
+          socketInstance?.emit("join", session.user.id);
+        }
+      });
+
+      socketInstance.on("disconnect", () => {
+        console.log("Socket disconnected!");
+        setIsConnected(false);
+      });
+
+      setSocket(socketInstance);
+    };
+
+    if (session?.user?.id) {
+      initSocket();
+    }
 
     return () => {
-      socketInstance.disconnect();
+      if (socketInstance) {
+        socketInstance.disconnect();
+      }
     };
   }, [session]);
 

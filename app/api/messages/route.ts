@@ -5,6 +5,9 @@ import { Chat } from "@/lib/models/Chat";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 
+const MAX_CHAT_MEDIA_BYTES = 100 * 1024 * 1024; // 100MB per chat
+const MEDIA_EXPIRY_MS = 24 * 60 * 60 * 1000;    // 1 day in milliseconds
+
 export async function GET(req: Request) {
   try {
     const session = await getServerSession(authOptions);
@@ -69,11 +72,28 @@ export async function POST(req: Request) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
 
-    const { receiverId, content } = await req.json();
+    const body = await req.json();
+    const { receiverId, content, type = "text", fileUrl, fileName, fileSize } = body;
 
-    if (!receiverId || !content) {
+    if (!receiverId) {
       return NextResponse.json(
         { message: "Missing required fields" },
+        { status: 400 }
+      );
+    }
+
+    // For text messages, content is required
+    if (type === "text" && !content) {
+      return NextResponse.json(
+        { message: "Missing required fields" },
+        { status: 400 }
+      );
+    }
+
+    // For media messages, fileUrl is required
+    if (type !== "text" && !fileUrl) {
+      return NextResponse.json(
+        { message: "Missing file data" },
         { status: 400 }
       );
     }
@@ -91,10 +111,37 @@ export async function POST(req: Request) {
       });
     }
 
+    // Enforce 100MB per-chat media cap
+    if (type !== "text" && fileSize) {
+      const mediaMessages = await Message.find({
+        chat: chat._id,
+        type: { $in: ["image", "file", "voice"] },
+        fileSize: { $exists: true },
+      }).select("fileSize");
+
+      const totalUsed = mediaMessages.reduce((sum, m) => sum + (m.fileSize || 0), 0);
+
+      if (totalUsed + fileSize > MAX_CHAT_MEDIA_BYTES) {
+        const usedMB = (totalUsed / (1024 * 1024)).toFixed(1);
+        return NextResponse.json(
+          { message: `Chat media storage is full (${usedMB}MB / 100MB used). Media messages expire after 1 day to free space.` },
+          { status: 413 }
+        );
+      }
+    }
+
+    // Set expiry for media messages (1 day from now)
+    const expiresAt = type !== "text" ? new Date(Date.now() + MEDIA_EXPIRY_MS) : undefined;
+
     const newMessage = await Message.create({
       chat: chat._id,
       sender: session.user.id,
-      content,
+      content: content || "",
+      type,
+      fileUrl,
+      fileName,
+      fileSize,
+      expiresAt,
     });
 
     chat.latestMessage = newMessage._id;

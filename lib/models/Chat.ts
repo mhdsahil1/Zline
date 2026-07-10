@@ -6,6 +6,8 @@ export interface IChat extends Document {
   groupName?: string;
   groupAdmin?: mongoose.Types.ObjectId;
   latestMessage?: mongoose.Types.ObjectId;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 const chatSchema = new Schema<IChat>(

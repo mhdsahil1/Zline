@@ -5,25 +5,57 @@ export interface IReaction {
   emoji: string;
 }
 
+export interface IPollOption {
+  text: string;
+  votes: mongoose.Types.ObjectId[];
+}
+
+export interface IPoll {
+  question: string;
+  options: IPollOption[];
+  isEnded: boolean;
+}
+
 export interface IMessage extends Document {
   chat: mongoose.Types.ObjectId;
   sender: mongoose.Types.ObjectId;
   content: string;
   status: "sent" | "delivered" | "seen";
-  type: "text" | "image" | "file" | "voice";
+  type: "text" | "image" | "file" | "voice" | "poll";
   fileUrl?: string;
   fileName?: string;
   fileSize?: number;
+  poll?: IPoll;
   isEdited: boolean;
   deletedFor: mongoose.Types.ObjectId[];
   deletedForEveryone: boolean;
   reactions: IReaction[];
+  expiresAt?: Date;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 const reactionSchema = new Schema<IReaction>(
   {
     userId: { type: Schema.Types.ObjectId, ref: "User", required: true },
     emoji: { type: String, required: true },
+  },
+  { _id: false }
+);
+
+const pollOptionSchema = new Schema<IPollOption>(
+  {
+    text: { type: String, required: true },
+    votes: [{ type: Schema.Types.ObjectId, ref: "User" }],
+  },
+  { _id: false }
+);
+
+const pollSchema = new Schema<IPoll>(
+  {
+    question: { type: String, required: true },
+    options: [pollOptionSchema],
+    isEnded: { type: Boolean, default: false },
   },
   { _id: false }
 );
@@ -40,16 +72,20 @@ const messageSchema = new Schema<IMessage>(
     },
     type: {
       type: String,
-      enum: ["text", "image", "file", "voice"],
+      enum: ["text", "image", "file", "voice", "poll"],
       default: "text",
     },
     fileUrl: { type: String },
     fileName: { type: String },
     fileSize: { type: Number },
+    poll: pollSchema,
     isEdited: { type: Boolean, default: false },
     deletedFor: [{ type: Schema.Types.ObjectId, ref: "User" }],
     deletedForEveryone: { type: Boolean, default: false },
     reactions: [reactionSchema],
+    // TTL index: MongoDB auto-deletes the document when expiresAt is reached.
+    // Only set on media messages (image, file, voice). Text/poll messages never expire.
+    expiresAt: { type: Date, index: { expires: 0 } },
   },
   { timestamps: true }
 );

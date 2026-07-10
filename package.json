@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "bcryptjs": "^3.0.3",
+    "cloudflared": "^0.7.1",
     "date-fns": "^4.1.0",
     "lucide-react": "^1.14.0",
     "mongodb": "^7.2.0",

@@ -5,6 +5,44 @@
   --foreground: #171717;
 }
 
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: #1b1818; /* Deep brand charcoal */
+    --foreground: #ededed;
+  }
+}
+
+@theme {
+  /* Brand Accent Color (Red/Orange #e73700) mapped to default blue classes for seamless backward compatibility */
+  --color-blue-50: #fdf2f0;
+  --color-blue-100: #fbe1db;
+  --color-blue-200: #f7c6bc;
+  --color-blue-300: #f1a190;
+  --color-blue-400: #e97059;
+  --color-blue-500: #e73700;
+  --color-blue-600: #e73700;
+  --color-blue-700: #c62f00;
+  --color-blue-800: #902200;
+  --color-blue-900: #761c00;
+  --color-blue-950: #410e00;
+
+  /* Brand Dark Neutral Charcoal (#241f1f) mapped to zinc for premium, styled dark-mode layouts */
+  --color-zinc-50: #fbfafa;
+  --color-zinc-100: #f2f0f0;
+  --color-zinc-200: #e3e0e0;
+  --color-zinc-300: #c6bebe;
+  --color-zinc-400: #a19595;
+  --color-zinc-500: #7d7070;
+  --color-zinc-600: #594f4f;
+  --color-zinc-700: #463d3d;
+  --color-zinc-800: #342d2d;
+  --color-zinc-900: #241f1f;
+  --color-zinc-950: #1b1818;
+
+  /* Soft Brand Black to prevent high-contrast pitch-black screens */
+  --color-black: #121010;
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -12,15 +50,41 @@
   --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
-}
-
 body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+  /* Prevent iOS text size adjustment on rotation */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  /* Prevent momentum scrolling leaking out of containers */
+  overscroll-behavior: none;
+}
+
+/* Remove tap highlight on mobile */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Fix iOS safe area for notch/home bar */
+.safe-bottom {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* Smooth momentum scrolling on iOS */
+.scroll-touch {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Fix 100vh on mobile browsers (address bar shrinks viewport) */
+.h-screen-mobile {
+  height: 100vh;
+  height: 100dvh; /* dynamic viewport height — supported on iOS 15.4+, Android Chrome */
+}
+
+/* Prevent inputs from being covered by the virtual keyboard on mobile */
+.input-area {
+  position: sticky;
+  bottom: 0;
+  bottom: env(safe-area-inset-bottom, 0);
 }

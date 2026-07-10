@@ -7,6 +7,8 @@ export interface IUser extends Document {
   image?: string;
   isOnline: boolean;
   lastSeen: Date;
+  createdAt: Date;
+  updatedAt: Date;
 }
 
 const userSchema = new Schema<IUser>(
