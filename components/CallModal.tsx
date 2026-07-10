@@ -419,8 +419,10 @@ export default function CallModal({ socket, currentUserId, currentUserName }: Ca
     };
 
     const onDisconnect = () => {
-      cleanup();
-      setErrorMessage("Call ended: disconnected from server.");
+      if (callState !== "idle") {
+        cleanup();
+        setErrorMessage("Call ended: disconnected from server.");
+      }
     };
 
     socket.on("incoming_call", onIncomingCall);
