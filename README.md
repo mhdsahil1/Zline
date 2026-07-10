@@ -93,7 +93,7 @@ zline/
 ## Clone Repository
 
 ```bash
-git clone https://github.com/yourusername/zline.git
+git clone https://github.com/mhdsahil1/zline.git
 cd zline
 ```
 
@@ -136,10 +136,7 @@ http://localhost:3000
 Add screenshots here.
 
 ```
-/screenshots/chat.png
-/screenshots/video-call.png
-/screenshots/mobile.png
-```
+
 
 ---
 
