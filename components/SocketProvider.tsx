@@ -24,16 +24,21 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
   const { data: session } = useSession();
 
   useEffect(() => {
+    if (!session?.user?.id) return;
+
     let socketInstance: Socket | null = null;
 
     const initSocket = async () => {
-      try {
-        await fetch("/api/socket/io");
-      } catch (error) {
-        console.error("Socket initialization failed", error);
+      const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "";
+      if (!socketUrl) {
+        try {
+          await fetch("/api/socket/io");
+        } catch (error) {
+          console.error("Socket initialization failed", error);
+        }
       }
 
-      socketInstance = io({
+      socketInstance = io(socketUrl || undefined, {
         path: "/api/socket/io",
         addTrailingSlash: false,
       });
@@ -54,16 +59,14 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
       setSocket(socketInstance);
     };
 
-    if (session?.user?.id) {
-      initSocket();
-    }
+    initSocket();
 
     return () => {
       if (socketInstance) {
         socketInstance.disconnect();
       }
     };
-  }, [session]);
+  }, [session?.user?.id]);
 
   return (
     <SocketContext.Provider value={{ socket, isConnected }}>

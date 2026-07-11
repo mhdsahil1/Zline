@@ -152,16 +152,33 @@ export default function Home() {
 
     const setupE2EKeys = async () => {
       try {
-        let privateKeyJwk = localStorage.getItem("zline_e2e_private_key");
-        let publicKeyJwk = localStorage.getItem("zline_e2e_public_key");
+        const userPrivKeyName = `zline_e2e_private_key_${session.user.id}`;
+        const userPubKeyName = `zline_e2e_public_key_${session.user.id}`;
+
+        let privateKeyJwk = localStorage.getItem(userPrivKeyName);
+        let publicKeyJwk = localStorage.getItem(userPubKeyName);
+
+        // Fallback to legacy non-user-specific keys
+        if (!privateKeyJwk || !publicKeyJwk) {
+          const legacyPriv = localStorage.getItem("zline_e2e_private_key");
+          const legacyPub = localStorage.getItem("zline_e2e_public_key");
+          if (legacyPriv && legacyPub) {
+            privateKeyJwk = legacyPriv;
+            publicKeyJwk = legacyPub;
+            localStorage.setItem(userPrivKeyName, privateKeyJwk);
+            localStorage.setItem(userPubKeyName, publicKeyJwk);
+            localStorage.removeItem("zline_e2e_private_key");
+            localStorage.removeItem("zline_e2e_public_key");
+          }
+        }
 
         if (!privateKeyJwk || !publicKeyJwk) {
           console.log("Generating new E2EE keys...");
           const keypair = await generateE2EKeypair();
           privateKeyJwk = await exportKeyToJwk(keypair.privateKey);
           publicKeyJwk = await exportKeyToJwk(keypair.publicKey);
-          localStorage.setItem("zline_e2e_private_key", privateKeyJwk);
-          localStorage.setItem("zline_e2e_public_key", publicKeyJwk);
+          localStorage.setItem(userPrivKeyName, privateKeyJwk);
+          localStorage.setItem(userPubKeyName, publicKeyJwk);
         }
 
         // Upload to server
@@ -299,14 +316,26 @@ export default function Home() {
   // Decrypts an array of messages using our private key
   const decryptMessagesArray = useCallback(async (msgs: any[]) => {
     if (typeof window === "undefined") return msgs;
-    const myPrivateKey = localStorage.getItem("zline_e2e_private_key");
+    if (!session?.user?.id) return msgs;
+    const myPrivateKey = localStorage.getItem(`zline_e2e_private_key_${session.user.id}`);
     if (!myPrivateKey) return msgs;
 
     return await Promise.all(
       msgs.map(async (m) => {
-        if (m.isEncrypted && m.encAesKey && m.iv) {
+        if (m.isEncrypted && m.iv) {
           try {
-            const plaintext = await decryptMessage(m.content, m.encAesKey, m.iv, myPrivateKey);
+            // Check if current user is the sender (sender can be populated object or just ID string)
+            const senderId = typeof m.sender === "object" && m.sender !== null ? m.sender._id : m.sender;
+            const isSender = senderId === session.user.id;
+            
+            // For sender, use encAesKeyForSender (fallback to encAesKey if not present)
+            const aesKeyToDecrypt = isSender ? (m.encAesKeyForSender || m.encAesKey) : m.encAesKey;
+
+            if (!aesKeyToDecrypt) {
+              throw new Error("No AES key found for decryption");
+            }
+
+            const plaintext = await decryptMessage(m.content, aesKeyToDecrypt, m.iv, myPrivateKey);
             return { ...m, content: plaintext };
           } catch (err) {
             console.error("Failed to decrypt message:", m._id, err);
@@ -316,7 +345,7 @@ export default function Home() {
         return m;
       })
     );
-  }, []);
+  }, [session?.user?.id]);
 
   // Fetch messages for selected chat
   const fetchMessages = useCallback(async (receiverId: string | null, chatId?: string | null) => {
@@ -662,10 +691,12 @@ export default function Home() {
         // Perform E2EE if recipient public key is available and message is text type
         if (recipientPublicKey && payload.type === "text" && payload.content) {
           try {
-            const encrypted = await encryptMessage(payload.content, recipientPublicKey);
+            const myPublicKey = session?.user?.id ? localStorage.getItem(`zline_e2e_public_key_${session.user.id}`) : null;
+            const encrypted = await encryptMessage(payload.content, recipientPublicKey, myPublicKey || undefined);
             body.content = encrypted.encryptedContent;
             body.isEncrypted = true;
             body.encAesKey = encrypted.encAesKey;
+            body.encAesKeyForSender = encrypted.encAesKeyForSender;
             body.iv = encrypted.iv;
           } catch (cryptoErr) {
             console.error("Encryption failed, sending unencrypted fallback:", cryptoErr);
@@ -697,7 +728,8 @@ export default function Home() {
         if (selectedChat.isGroup) {
           socket.emit("send_message", { chatId: selectedChat._id, message });
         } else {
-          socket.emit("send_message", { receiverId: selectedChat.otherUser._id, message: decryptedMsg });
+          // Emit the original encrypted message to preserve End-to-End Encryption in transit
+          socket.emit("send_message", { receiverId: selectedChat.otherUser._id, message });
         }
       }
       // Update sidebar

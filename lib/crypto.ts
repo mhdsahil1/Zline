@@ -68,8 +68,9 @@ export async function importPrivateKey(jwkStr: string): Promise<CryptoKey> {
 // Hybrid Encryption (AES-GCM for message content, RSA-OAEP for AES key)
 export async function encryptMessage(
   text: string,
-  recipientPublicKeyJwk: string
-): Promise<{ encryptedContent: string; encAesKey: string; iv: string }> {
+  recipientPublicKeyJwk: string,
+  senderPublicKeyJwk?: string
+): Promise<{ encryptedContent: string; encAesKey: string; encAesKeyForSender?: string; iv: string }> {
   // 1. Import recipient public key
   const rsaPubKey = await importPublicKey(recipientPublicKeyJwk);
 
@@ -107,10 +108,28 @@ export async function encryptMessage(
     rawAesKey
   );
 
+  let encAesKeyForSender: string | undefined = undefined;
+  if (senderPublicKeyJwk) {
+    try {
+      const senderRsaPubKey = await importPublicKey(senderPublicKeyJwk);
+      const encryptedAesKeyForSenderBuf = await window.crypto.subtle.encrypt(
+        {
+          name: "RSA-OAEP",
+        },
+        senderRsaPubKey,
+        rawAesKey
+      );
+      encAesKeyForSender = arrayBufferToBase64(encryptedAesKeyForSenderBuf);
+    } catch (err) {
+      console.error("Failed to encrypt AES key for sender:", err);
+    }
+  }
+
   // 6. Convert buffers to base64
   return {
     encryptedContent: arrayBufferToBase64(encryptedBuf),
     encAesKey: arrayBufferToBase64(encryptedAesKeyBuf),
+    encAesKeyForSender,
     iv: arrayBufferToBase64(iv.buffer),
   };
 }

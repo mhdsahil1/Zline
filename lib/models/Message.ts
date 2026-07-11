@@ -38,6 +38,7 @@ export interface IMessage extends Document {
   readBy: IReadReceipt[];
   isEncrypted?: boolean;
   encAesKey?: string;
+  encAesKeyForSender?: string;
   iv?: string;
   expiresAt?: Date;
   createdAt: Date;
@@ -103,6 +104,7 @@ const messageSchema = new Schema<IMessage>(
     readBy: [readReceiptSchema],
     isEncrypted: { type: Boolean, default: false },
     encAesKey: { type: String },
+    encAesKeyForSender: { type: String },
     iv: { type: String },
     // TTL index: MongoDB auto-deletes the document when expiresAt is reached.
     // Only set on media messages (image, file, voice). Text/poll messages never expire.

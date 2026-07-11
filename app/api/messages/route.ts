@@ -93,7 +93,7 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json();
-    const { receiverId, chatId, content, type = "text", fileUrl, fileName, fileSize, isEncrypted, encAesKey, iv } = body;
+    const { receiverId, chatId, content, type = "text", fileUrl, fileName, fileSize, isEncrypted, encAesKey, encAesKeyForSender, iv } = body;
 
     if (!receiverId && !chatId) {
       return NextResponse.json(
@@ -177,6 +177,7 @@ export async function POST(req: Request) {
       expiresAt,
       isEncrypted: !!isEncrypted,
       encAesKey,
+      encAesKeyForSender,
       iv,
     });
 
