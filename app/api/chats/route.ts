@@ -23,7 +23,7 @@ export async function GET() {
       .populate("users", "name email image isOnline lastSeen")
       .populate({
         path: "latestMessage",
-        select: "content sender createdAt type",
+        select: "content sender createdAt type isEncrypted encAesKey encAesKeyForSender iv",
       })
       .sort({ updatedAt: -1 })
       .lean();

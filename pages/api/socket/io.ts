@@ -3,12 +3,29 @@ import { NextApiRequest, NextApiResponse } from "next";
 import { Server as ServerIO } from "socket.io";
 import { connectDB } from "@/lib/db";
 import { Chat } from "@/lib/models/Chat";
+import { Call } from "@/lib/models/Call";
 
 export const config = {
   api: {
     bodyParser: false,
   },
 };
+
+// Keep track of ongoing calls in memory
+const activeCalls = new Map<string, {
+  callId: string;
+  callerId: string;
+  calleeId: string;
+  initiatedAt: Date;
+  connectedAt?: Date;
+}>();
+
+const activeGroupCalls = new Map<string, {
+  callId: string;
+  chatId: string;
+  startedAt: Date;
+  activeUsers: Set<string>;
+}>();
 
 const ioHandler = (req: NextApiRequest, res: any) => {
   if (!res.socket.server.io) {
@@ -24,6 +41,7 @@ const ioHandler = (req: NextApiRequest, res: any) => {
       
       // ─── Presence ───────────────────────────────────────────────────────
       socket.on("join", async (userId) => {
+        (socket as any).userId = userId;
         socket.join(userId);
         console.log(`User ${userId} joined their personal room`);
         socket.broadcast.emit("user_online", userId);
@@ -49,7 +67,6 @@ const ioHandler = (req: NextApiRequest, res: any) => {
 
       socket.on("create_group", (data) => {
         // data: { chatId, userIds }
-        // Iterate over all active sockets and make matching users join the room
         const connectedSockets = io.sockets.sockets;
         connectedSockets.forEach((s) => {
           data.userIds.forEach((uId: string) => {
@@ -100,7 +117,6 @@ const ioHandler = (req: NextApiRequest, res: any) => {
       });
 
       // Per-message read receipt (for tooltip)
-      // data: { targetId, chatId, messageId, userId, readAt }
       socket.on("read_receipt", (data) => {
         if (data.chatId) {
           socket.to(data.chatId).emit("read_receipt", {
@@ -126,7 +142,6 @@ const ioHandler = (req: NextApiRequest, res: any) => {
       });
 
       // ─── Polls ──────────────────────────────────────────────────────────
-      // data: { receiverId, chatId, updatedMessage }
       socket.on("poll_update", (data) => {
         if (data.chatId) {
           socket.to(data.chatId).emit("poll_updated", data.updatedMessage);
@@ -136,7 +151,6 @@ const ioHandler = (req: NextApiRequest, res: any) => {
       });
 
       // ─── Reactions ────────────────────────────────────────────────────────
-      // data: { targetUserId, chatId, messageId, reactions }
       socket.on("reaction_update", (data) => {
         if (data.chatId) {
           socket.to(data.chatId).emit("reaction_updated", {
@@ -154,58 +168,179 @@ const ioHandler = (req: NextApiRequest, res: any) => {
 
       // ─── WebRTC Signaling (Audio / Video Calls) ─────────────────────────
       // Caller → Callee: initiate a call
-      // data: { calleeId, offer, callType: "audio"|"video", callerId, callerName }
-      socket.on("call_user", (data) => {
-        io.to(data.calleeId).emit("incoming_call", {
-          offer: data.offer,
-          callType: data.callType,
-          callerId: data.callerId,
-          callerName: data.callerName,
-        });
+      socket.on("call_user", async (data) => {
+        // data: { calleeId, offer, callType: "audio"|"video", callerId, callerName }
+        try {
+          await connectDB();
+          const newCall = await Call.create({
+            caller: data.callerId,
+            participants: [data.calleeId],
+            type: data.callType === "video" ? "video" : "voice",
+            status: "missed", // default status
+            startedAt: new Date(),
+          });
+
+          const callInfo = {
+            callId: newCall._id.toString(),
+            callerId: data.callerId,
+            calleeId: data.calleeId,
+            initiatedAt: new Date(),
+          };
+
+          activeCalls.set(data.callerId, callInfo);
+          activeCalls.set(data.calleeId, callInfo);
+
+          io.to(data.calleeId).emit("incoming_call", {
+            offer: data.offer,
+            callType: data.callType,
+            callerId: data.callerId,
+            callerName: data.callerName,
+            callId: newCall._id.toString(),
+          });
+        } catch (err) {
+          console.error("Error creating call log:", err);
+        }
       });
 
       // Callee → Caller: accept with SDP answer
-      // data: { callerId, answer }
-      socket.on("call_answer", (data) => {
+      socket.on("call_answer", async (data) => {
+        // data: { callerId, answer }
+        const callInfo = activeCalls.get(data.callerId);
+        if (callInfo) {
+          callInfo.connectedAt = new Date();
+          try {
+            await connectDB();
+            await Call.findByIdAndUpdate(callInfo.callId, {
+              status: "completed",
+              startedAt: callInfo.connectedAt,
+            });
+          } catch (err) {
+            console.error("Error answering call:", err);
+          }
+        }
         io.to(data.callerId).emit("call_answered", { answer: data.answer });
       });
 
       // Relay ICE candidates between peers
-      // data: { targetId, candidate }
       socket.on("ice_candidate", (data) => {
         io.to(data.targetId).emit("ice_candidate", { candidate: data.candidate });
       });
 
       // Callee → Caller: reject incoming call
-      // data: { callerId }
-      socket.on("call_reject", (data) => {
+      socket.on("call_reject", async (data) => {
+        // data: { callerId }
+        const callInfo = activeCalls.get(data.callerId);
+        if (callInfo) {
+          try {
+            await connectDB();
+            await Call.findByIdAndUpdate(callInfo.callId, {
+              status: "rejected",
+            });
+          } catch (err) {
+            console.error("Error rejecting call:", err);
+          }
+          activeCalls.delete(callInfo.callerId);
+          activeCalls.delete(callInfo.calleeId);
+        }
         io.to(data.callerId).emit("call_rejected");
       });
 
       // Either side ends an active call
-      // data: { targetId }
-      socket.on("call_end", (data) => {
+      socket.on("call_end", async (data) => {
+        // data: { targetId }
+        const myUserId = (socket as any).userId;
+        const lookupId = myUserId || data.targetId;
+        const callInfo = activeCalls.get(lookupId);
+
+        if (callInfo) {
+          try {
+            await connectDB();
+            if (callInfo.connectedAt) {
+              const endedAt = new Date();
+              const duration = Math.max(0, Math.round((endedAt.getTime() - callInfo.connectedAt.getTime()) / 1000));
+              await Call.findByIdAndUpdate(callInfo.callId, {
+                endedAt,
+                duration,
+                status: "completed",
+              });
+            } else {
+              const isCaller = myUserId === callInfo.callerId;
+              await Call.findByIdAndUpdate(callInfo.callId, {
+                status: isCaller ? "cancelled" : "missed",
+              });
+            }
+          } catch (err) {
+            console.error("Error ending call:", err);
+          }
+          activeCalls.delete(callInfo.callerId);
+          activeCalls.delete(callInfo.calleeId);
+        }
         io.to(data.targetId).emit("call_ended");
       });
 
       // ─── Group WebRTC Calling ────────────────────────────────────────────
-      socket.on("group_call_start", (data) => {
+      socket.on("group_call_start", async (data) => {
         // data: { chatId, callerId, callerName, callType }
-        socket.to(data.chatId).emit("incoming_group_call", data);
+        try {
+          await connectDB();
+          const chat = await Chat.findById(data.chatId);
+          const participants = chat ? chat.users.filter((u: any) => u.toString() !== data.callerId) : [];
+
+          const newCall = await Call.create({
+            chatId: data.chatId,
+            caller: data.callerId,
+            participants,
+            type: data.callType === "video" ? "video" : "voice",
+            status: "completed",
+            startedAt: new Date(),
+          });
+
+          const groupCallInfo = {
+            callId: newCall._id.toString(),
+            chatId: data.chatId,
+            startedAt: new Date(),
+            activeUsers: new Set<string>([data.callerId]),
+          };
+
+          activeGroupCalls.set(data.chatId, groupCallInfo);
+          socket.to(data.chatId).emit("incoming_group_call", data);
+        } catch (err) {
+          console.error("Error starting group call:", err);
+        }
       });
 
       socket.on("group_call_join", (data) => {
-        // data: { chatId, userId, userName }
+        const groupCallInfo = activeGroupCalls.get(data.chatId);
+        if (groupCallInfo) {
+          groupCallInfo.activeUsers.add(data.userId);
+        }
         socket.to(data.chatId).emit("group_call_joined", data);
       });
 
-      socket.on("group_call_leave", (data) => {
-        // data: { chatId, userId }
+      socket.on("group_call_leave", async (data) => {
+        const groupCallInfo = activeGroupCalls.get(data.chatId);
+        if (groupCallInfo) {
+          groupCallInfo.activeUsers.delete(data.userId);
+          if (groupCallInfo.activeUsers.size === 0) {
+            try {
+              await connectDB();
+              const endedAt = new Date();
+              const duration = Math.max(0, Math.round((endedAt.getTime() - groupCallInfo.startedAt.getTime()) / 1000));
+              await Call.findByIdAndUpdate(groupCallInfo.callId, {
+                endedAt,
+                duration,
+                status: "completed",
+              });
+            } catch (err) {
+              console.error("Error ending group call:", err);
+            }
+            activeGroupCalls.delete(data.chatId);
+          }
+        }
         socket.to(data.chatId).emit("group_call_left", data);
       });
 
       socket.on("group_call_signal", (data) => {
-        // data: { targetId, senderId, signal }
         io.to(data.targetId).emit("group_call_signaling", {
           senderId: data.senderId,
           signal: data.signal,
@@ -213,8 +348,61 @@ const ioHandler = (req: NextApiRequest, res: any) => {
       });
 
       // ─── Disconnect ──────────────────────────────────────────────────────
-      socket.on("disconnect", () => {
+      socket.on("disconnect", async () => {
         console.log("Client disconnected", socket.id);
+        const myUserId = (socket as any).userId;
+        if (myUserId) {
+          // End 1-to-1 active calls if user disconnects suddenly
+          const callInfo = activeCalls.get(myUserId);
+          if (callInfo) {
+            try {
+              await connectDB();
+              const targetId = myUserId === callInfo.callerId ? callInfo.calleeId : callInfo.callerId;
+              
+              if (callInfo.connectedAt) {
+                const endedAt = new Date();
+                const duration = Math.max(0, Math.round((endedAt.getTime() - callInfo.connectedAt.getTime()) / 1000));
+                await Call.findByIdAndUpdate(callInfo.callId, {
+                  endedAt,
+                  duration,
+                  status: "completed",
+                });
+              } else {
+                const isCaller = myUserId === callInfo.callerId;
+                await Call.findByIdAndUpdate(callInfo.callId, {
+                  status: isCaller ? "cancelled" : "missed",
+                });
+              }
+              io.to(targetId).emit("call_ended");
+            } catch (err) {
+              console.error("Error ending call on disconnect:", err);
+            }
+            activeCalls.delete(callInfo.callerId);
+            activeCalls.delete(callInfo.calleeId);
+          }
+
+          // Leave group calls if user disconnects
+          for (const [chatId, groupCallInfo] of activeGroupCalls.entries()) {
+            if (groupCallInfo.activeUsers.has(myUserId)) {
+              groupCallInfo.activeUsers.delete(myUserId);
+              if (groupCallInfo.activeUsers.size === 0) {
+                try {
+                  await connectDB();
+                  const endedAt = new Date();
+                  const duration = Math.max(0, Math.round((endedAt.getTime() - groupCallInfo.startedAt.getTime()) / 1000));
+                  await Call.findByIdAndUpdate(groupCallInfo.callId, {
+                    endedAt,
+                    duration,
+                    status: "completed",
+                  });
+                } catch (err) {
+                  console.error("Error ending group call on disconnect:", err);
+                }
+                activeGroupCalls.delete(chatId);
+              }
+            }
+          }
+        }
       });
     });
 

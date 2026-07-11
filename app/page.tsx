@@ -8,7 +8,8 @@ import {
   MessageCircle, LogOut, Send, Loader2, Check, CheckCheck,
   Search, ArrowLeft, Plus, X, Paperclip, Mic, StopCircle, Download, FileText,
   Phone, Video, BarChart2, ChevronRight, CheckCircle2, SmilePlus,
-  Image as ImageIcon, Music, Film, Code2, Archive, File, Users
+  Image as ImageIcon, Music, Film, Code2, Archive, File, Users,
+  PhoneCall, PhoneMissed, PhoneIncoming, PhoneOutgoing, MessageSquare
 } from "lucide-react";
 import { format, isToday, isYesterday, formatDistanceToNow } from "date-fns";
 import CallModal from "@/components/CallModal";
@@ -91,6 +92,9 @@ export default function Home() {
 
   // Sidebar state
   const [chats, setChats] = useState<any[]>([]);
+  const [sidebarTab, setSidebarTab] = useState<"chats" | "calls">("chats");
+  const [calls, setCalls] = useState<any[]>([]);
+  const [callsSearchQuery, setCallsSearchQuery] = useState("");
   const [searchMode, setSearchMode] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState<{users: any[], messages: any[]}>({ users: [], messages: [] });
@@ -224,6 +228,7 @@ export default function Home() {
   const selectedChatRef = useRef<any>(null);
   const sessionRef = useRef<any>(null);
   const fetchChatsRef = useRef<() => void>(() => {});
+  const fetchCallsRef = useRef<() => void>(() => {});
 
   // Keep refs in sync with latest state/session
   useEffect(() => { selectedChatRef.current = selectedChat; }, [selectedChat]);
@@ -234,18 +239,72 @@ export default function Home() {
     if (status === "unauthenticated") router.push("/login");
   }, [status, router]);
 
+  // Decrypts an array of messages using our private key
+  const decryptMessagesArray = useCallback(async (msgs: any[]) => {
+    if (typeof window === "undefined") return msgs;
+    if (!session?.user?.id) return msgs;
+    const myPrivateKey = localStorage.getItem(`zline_e2e_private_key_${session.user.id}`);
+    if (!myPrivateKey) return msgs;
+
+    return await Promise.all(
+      msgs.map(async (m) => {
+        if (m.isEncrypted && m.iv) {
+          try {
+            // Check if current user is the sender (sender can be populated object or just ID string)
+            const senderId = typeof m.sender === "object" && m.sender !== null ? m.sender._id : m.sender;
+            const isSender = senderId === session.user.id;
+            
+            // For sender, use encAesKeyForSender (fallback to encAesKey if not present)
+            const aesKeyToDecrypt = isSender ? (m.encAesKeyForSender || m.encAesKey) : m.encAesKey;
+
+            if (!aesKeyToDecrypt) {
+              throw new Error("No AES key found for decryption");
+            }
+
+            const plaintext = await decryptMessage(m.content, aesKeyToDecrypt, m.iv, myPrivateKey);
+            return { ...m, content: plaintext };
+          } catch (err) {
+            console.error("Failed to decrypt message:", m._id, err);
+            return { ...m, content: "🔒 Decryption failed" };
+          }
+        }
+        return m;
+      })
+    );
+  }, [session?.user?.id]);
+
   // Fetch recent chats
   const fetchChats = useCallback(async () => {
     try {
       const res = await fetch("/api/chats");
       if (res.ok) {
         const data = await res.json();
+
+        // Extract all latestMessages that exist and are encrypted
+        const messagesToDecrypt = data
+          .map((c: any) => c.latestMessage)
+          .filter((m: any) => m && m.isEncrypted);
+
+        if (messagesToDecrypt.length > 0) {
+          try {
+            const decryptedMessages = await decryptMessagesArray(messagesToDecrypt);
+            const decryptedMap = new Map(decryptedMessages.map((m: any) => [m._id, m]));
+            data.forEach((c: any) => {
+              if (c.latestMessage && decryptedMap.has(c.latestMessage._id)) {
+                c.latestMessage = decryptedMap.get(c.latestMessage._id);
+              }
+            });
+          } catch (decryptErr) {
+            console.error("Failed to decrypt latest messages:", decryptErr);
+          }
+        }
+
         setChats(data);
       }
     } catch (error) {
       console.error("Failed to fetch chats");
     }
-  }, []);
+  }, [decryptMessagesArray]);
 
   // Keep fetchChatsRef in sync
   useEffect(() => { fetchChatsRef.current = fetchChats; }, [fetchChats]);
@@ -253,6 +312,27 @@ export default function Home() {
   useEffect(() => {
     if (session?.user?.id) fetchChats();
   }, [session, fetchChats]);
+
+  // Fetch call history
+  const fetchCalls = useCallback(async () => {
+    try {
+      const res = await fetch("/api/calls");
+      if (res.ok) {
+        setCalls(await res.json());
+      }
+    } catch (error) {
+      console.error("Failed to fetch calls", error);
+    }
+  }, []);
+
+  // Keep fetchCallsRef in sync
+  useEffect(() => { fetchCallsRef.current = fetchCalls; }, [fetchCalls]);
+
+  useEffect(() => {
+    if (session?.user?.id) {
+      fetchCalls();
+    }
+  }, [session?.user?.id, fetchCalls]);
 
   // Search globally (users + messages)
   const handleSearch = (value: string) => {
@@ -313,39 +393,7 @@ export default function Home() {
     }
   };
 
-  // Decrypts an array of messages using our private key
-  const decryptMessagesArray = useCallback(async (msgs: any[]) => {
-    if (typeof window === "undefined") return msgs;
-    if (!session?.user?.id) return msgs;
-    const myPrivateKey = localStorage.getItem(`zline_e2e_private_key_${session.user.id}`);
-    if (!myPrivateKey) return msgs;
 
-    return await Promise.all(
-      msgs.map(async (m) => {
-        if (m.isEncrypted && m.iv) {
-          try {
-            // Check if current user is the sender (sender can be populated object or just ID string)
-            const senderId = typeof m.sender === "object" && m.sender !== null ? m.sender._id : m.sender;
-            const isSender = senderId === session.user.id;
-            
-            // For sender, use encAesKeyForSender (fallback to encAesKey if not present)
-            const aesKeyToDecrypt = isSender ? (m.encAesKeyForSender || m.encAesKey) : m.encAesKey;
-
-            if (!aesKeyToDecrypt) {
-              throw new Error("No AES key found for decryption");
-            }
-
-            const plaintext = await decryptMessage(m.content, aesKeyToDecrypt, m.iv, myPrivateKey);
-            return { ...m, content: plaintext };
-          } catch (err) {
-            console.error("Failed to decrypt message:", m._id, err);
-            return { ...m, content: "🔒 Decryption failed" };
-          }
-        }
-        return m;
-      })
-    );
-  }, [session?.user?.id]);
 
   // Fetch messages for selected chat
   const fetchMessages = useCallback(async (receiverId: string | null, chatId?: string | null) => {
@@ -553,6 +601,10 @@ export default function Home() {
       }
     };
 
+    const handleRefreshCalls = () => {
+      fetchCallsRef.current();
+    };
+
     socket.on("receive_message", handleReceiveMessage);
     socket.on("messages_seen", handleMessagesSeen);
     socket.on("message_status_update", handleStatusUpdate);
@@ -562,6 +614,10 @@ export default function Home() {
     socket.on("reaction_updated", handleReactionUpdated);
     socket.on("read_receipt", handleReadReceipt);
     socket.on("group_added", handleGroupAdded);
+    socket.on("incoming_call", handleRefreshCalls);
+    socket.on("call_answered", handleRefreshCalls);
+    socket.on("call_rejected", handleRefreshCalls);
+    socket.on("call_ended", handleRefreshCalls);
 
     return () => {
       socket.off("receive_message", handleReceiveMessage);
@@ -573,6 +629,10 @@ export default function Home() {
       socket.off("reaction_updated", handleReactionUpdated);
       socket.off("read_receipt", handleReadReceipt);
       socket.off("group_added", handleGroupAdded);
+      socket.off("incoming_call", handleRefreshCalls);
+      socket.off("call_answered", handleRefreshCalls);
+      socket.off("call_rejected", handleRefreshCalls);
+      socket.off("call_ended", handleRefreshCalls);
     };
   }, [socket]); // stable — never re-registers due to selectedChat/session changes
 
@@ -1063,206 +1123,424 @@ export default function Home() {
             : "hidden md:flex md:w-72 lg:w-80"
         }
       `}>
-        {/* Header */}
-        <div className="h-16 flex items-center justify-between px-4 border-b border-gray-200 dark:border-zinc-800">
-          {searchMode ? (
-            <div className="flex items-center gap-2 w-full">
-              <button onClick={() => { setSearchMode(false); setSearchQuery(""); setSearchResults({ users: [], messages: [] }); }}>
-                <ArrowLeft className="h-5 w-5 text-gray-500 hover:text-gray-700 dark:text-zinc-400" />
-              </button>
-              <input
-                autoFocus
-                type="text"
-                value={searchQuery}
-                onChange={(e) => handleSearch(e.target.value)}
-                placeholder="Search..."
-                className="flex-1 bg-gray-100 dark:bg-zinc-800 rounded-lg px-3 py-2 text-sm outline-none dark:text-white"
-              />
-              {searchQuery && (
-                <button onClick={() => { setSearchQuery(""); setSearchResults({ users: [], messages: [] }); }}>
-                  <X className="h-4 w-4 text-gray-400" />
-                </button>
-              )}
-            </div>
-          ) : (
-            <>
-              <div className="flex items-center">
-                <Logo className="h-7 w-auto" />
-              </div>
-              <div className="flex items-center gap-1">
-                <button onClick={() => setSearchMode(true)} className="p-2 text-gray-500 hover:text-blue-600 transition-colors" title="New chat">
-                  <Plus className="h-5 w-5" />
-                </button>
-                <button onClick={openCreateGroup} className="p-2 text-gray-500 hover:text-blue-600 transition-colors" title="New group">
-                  <Users className="h-5 w-5" />
-                </button>
-                <button onClick={() => signOut()} className="p-2 text-gray-500 hover:text-red-600 transition-colors" title="Log out">
-                  <LogOut className="h-5 w-5" />
-                </button>
-              </div>
-            </>
-          )}
-        </div>
-
-        {/* Search bar (always visible when not in search mode) */}
-        {!searchMode && (
-          <div className="px-3 py-2">
-            <div
-              onClick={() => setSearchMode(true)}
-              className="flex items-center gap-2 bg-gray-100 dark:bg-zinc-800 rounded-lg px-3 py-2 cursor-pointer"
-            >
-              <Search className="h-4 w-4 text-gray-400" />
-              <span className="text-sm text-gray-400">Search or start new chat</span>
-            </div>
-          </div>
-        )}
-
-        {/* Profile card */}
-        {!searchMode && (
-          <div className="px-4 py-3 bg-gray-50 dark:bg-zinc-900/50 border-b border-gray-100 dark:border-zinc-800">
-            <div className="flex items-center gap-3">
-              <div className="w-9 h-9 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-sm dark:bg-blue-900/30">
-                {session?.user?.name?.charAt(0).toUpperCase()}
-              </div>
-              <div>
-                <p className="text-sm font-semibold text-gray-900 dark:text-white">{session?.user?.name}</p>
-                <p className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
-                  Online
-                </p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Content: Search results OR Recent chats */}
-        <div className="flex-1 overflow-y-auto">
-          {searchMode ? (
-            <>
-              {searchLoading && (
-                <div className="flex justify-center py-8">
-                  <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
-                </div>
-              )}
-              {!searchLoading && searchResults.users.length === 0 && searchResults.messages.length === 0 && searchQuery && (
-                <p className="text-center text-sm text-gray-400 py-8">No results found</p>
-              )}
-              
-              {/* Users Results */}
-              {searchResults.users.length > 0 && (
-                <div className="py-2">
-                  <p className="px-4 py-1 text-xs font-bold text-gray-500 uppercase tracking-wider">Contacts</p>
-                  {searchResults.users.map((user) => (
-                    <button
-                      key={user._id}
-                      onClick={() => openChatWithUser(user)}
-                      className="w-full flex items-center gap-3 p-3 hover:bg-gray-50 dark:hover:bg-zinc-900/50 transition-colors"
-                    >
-                      <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-gray-600 font-bold dark:bg-zinc-800 dark:text-gray-400">
-                        {user.name.charAt(0).toUpperCase()}
-                      </div>
-                      <div className="text-left">
-                        <p className="text-sm font-semibold text-gray-900 dark:text-white">{user.name}</p>
-                        <p className="text-xs text-gray-400">{user.email}</p>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              )}
-
-              {/* Messages Results */}
-              {searchResults.messages.length > 0 && (
-                <div className="py-2 border-t border-gray-100 dark:border-zinc-800">
-                  <p className="px-4 py-1 text-xs font-bold text-gray-500 uppercase tracking-wider">Messages</p>
-                  {searchResults.messages.map((msg) => {
-                    // Figure out chat name
-                    const chatObj = msg.chat;
-                    const otherUsers = chatObj?.users?.filter((u: any) => u._id !== session?.user?.id) || [];
-                    const chatName = chatObj?.isGroup ? chatObj.groupName : (otherUsers[0]?.name || "Unknown");
-                    
-                    return (
-                      <button
-                        key={msg._id}
-                        onClick={() => jumpToMessage(msg)}
-                        className="w-full flex items-start gap-3 p-3 hover:bg-gray-50 dark:hover:bg-zinc-900/50 transition-colors text-left"
-                      >
-                        <div className="w-10 h-10 rounded-full bg-blue-100 flex-shrink-0 flex items-center justify-center text-blue-600 dark:bg-blue-900/30">
-                          <MessageCircle className="h-5 w-5" />
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <div className="flex justify-between">
-                            <p className="text-xs font-semibold text-gray-900 dark:text-white truncate">{chatName}</p>
-                            <span className="text-[10px] text-gray-400">{formatChatTime(msg.createdAt)}</span>
-                          </div>
-                          <p className="text-sm text-gray-600 dark:text-zinc-300 mt-0.5 break-words line-clamp-2">
-                            {msg.sender?._id === session?.user?.id ? "You: " : `${msg.sender?.name}: `}
-                            {msg.content}
-                          </p>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              )}
-            </>
-          ) : (
-            <>
-              {chats.length === 0 ? (
-                <div className="text-center py-12 px-4">
-                  <MessageCircle className="h-10 w-10 text-gray-300 dark:text-zinc-600 mx-auto mb-3" />
-                  <p className="text-sm text-gray-400 dark:text-zinc-500">No chats yet</p>
-                  <button onClick={() => setSearchMode(true)} className="text-sm text-blue-600 mt-2 hover:underline">
-                    Start a new chat
+        {sidebarTab === "chats" ? (
+          <>
+            {/* Header */}
+            <div className="h-16 flex items-center justify-between px-4 border-b border-gray-200 dark:border-zinc-800">
+              {searchMode ? (
+                <div className="flex items-center gap-2 w-full">
+                  <button onClick={() => { setSearchMode(false); setSearchQuery(""); setSearchResults({ users: [], messages: [] }); }}>
+                    <ArrowLeft className="h-5 w-5 text-gray-500 hover:text-gray-700 dark:text-zinc-400" />
                   </button>
+                  <input
+                    autoFocus
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => handleSearch(e.target.value)}
+                    placeholder="Search..."
+                    className="flex-1 bg-gray-100 dark:bg-zinc-800 rounded-lg px-3 py-2 text-sm outline-none dark:text-white"
+                  />
+                  {searchQuery && (
+                    <button onClick={() => { setSearchQuery(""); setSearchResults({ users: [], messages: [] }); }}>
+                      <X className="h-4 w-4 text-gray-400" />
+                    </button>
+                  )}
                 </div>
               ) : (
-                chats.map((chat) => (
-                  <button
-                    key={chat._id || chat.otherUser?._id}
-                    onClick={() => { setSelectedChat(chat); setMobileView("chat"); }}
-                    className={`w-full flex items-center gap-3 px-3 py-3 transition-colors border-b border-gray-50 dark:border-zinc-800/50 ${
-                      selectedChat?.otherUser?._id === chat.otherUser?._id
-                        ? "bg-blue-50 dark:bg-zinc-900"
-                        : "hover:bg-gray-50 dark:hover:bg-zinc-900/50 active:bg-gray-100 dark:active:bg-zinc-900"
-                    }`}
-                  >
-                    <div className="relative flex-shrink-0">
-                      <div className="w-11 h-11 rounded-full bg-gray-200 flex items-center justify-center text-gray-600 font-bold dark:bg-zinc-800 dark:text-gray-400">
-                        {chat.chatInitial}
-                      </div>
-                      {chat.isOnline && (
-                        <div className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-green-500 border-2 border-white dark:border-zinc-950"></div>
-                      )}
-                    </div>
-                    <div className="flex-1 min-w-0 text-left">
-                      <div className="flex justify-between items-baseline">
-                        <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">
-                          {chat.chatName}
-                        </p>
-                        {chat.latestMessage?.createdAt && (
-                          <span className={`text-[10px] flex-shrink-0 ml-2 ${
-                            chat.unreadCount > 0 ? "text-blue-600 font-semibold" : "text-gray-400 dark:text-zinc-500"
-                          }`}>
-                            {formatChatTime(chat.latestMessage.createdAt)}
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex justify-between items-center mt-0.5">
-                        <p className="text-xs text-gray-500 dark:text-zinc-400 truncate pr-2">
-                          {getPreview(chat)}
-                        </p>
-                        {chat.unreadCount > 0 && (
-                          <span className="bg-blue-600 text-white text-[10px] font-bold min-w-[18px] h-[18px] flex items-center justify-center rounded-full flex-shrink-0">
-                            {chat.unreadCount}
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                  </button>
-                ))
+                <>
+                  <div className="flex items-center">
+                    <Logo className="h-7 w-auto" />
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => setSearchMode(true)} className="p-2 text-gray-500 hover:text-blue-600 transition-colors" title="New chat">
+                      <Plus className="h-5 w-5" />
+                    </button>
+                    <button onClick={openCreateGroup} className="p-2 text-gray-500 hover:text-blue-600 transition-colors" title="New group">
+                      <Users className="h-5 w-5" />
+                    </button>
+                    <button onClick={() => signOut()} className="p-2 text-gray-500 hover:text-red-600 transition-colors" title="Log out">
+                      <LogOut className="h-5 w-5" />
+                    </button>
+                  </div>
+                </>
               )}
-            </>
-          )}
+            </div>
+
+            {/* Search bar (always visible when not in search mode) */}
+            {!searchMode && (
+              <div className="px-3 py-2">
+                <div
+                  onClick={() => setSearchMode(true)}
+                  className="flex items-center gap-2 bg-gray-100 dark:bg-zinc-800 rounded-lg px-3 py-2 cursor-pointer"
+                >
+                  <Search className="h-4 w-4 text-gray-400" />
+                  <span className="text-sm text-gray-400">Search or start new chat</span>
+                </div>
+              </div>
+            )}
+
+            {/* Profile card */}
+            {!searchMode && (
+              <div className="px-4 py-3 bg-gray-50 dark:bg-zinc-900/50 border-b border-gray-100 dark:border-zinc-800">
+                <div className="flex items-center gap-3">
+                  <div className="w-9 h-9 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-sm dark:bg-blue-900/30">
+                    {session?.user?.name?.charAt(0).toUpperCase()}
+                  </div>
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900 dark:text-white">{session?.user?.name}</p>
+                    <p className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
+                      <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+                      Online
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Content: Search results OR Recent chats */}
+            <div className="flex-1 overflow-y-auto">
+              {searchMode ? (
+                <>
+                  {searchLoading && (
+                    <div className="flex justify-center py-8">
+                      <Loader2 className="h-5 w-5 animate-spin text-blue-600" />
+                    </div>
+                  )}
+                  {!searchLoading && searchResults.users.length === 0 && searchResults.messages.length === 0 && searchQuery && (
+                    <p className="text-center text-sm text-gray-400 py-8">No results found</p>
+                  )}
+                  
+                  {/* Users Results */}
+                  {searchResults.users.length > 0 && (
+                    <div className="py-2">
+                      <p className="px-4 py-1 text-xs font-bold text-gray-500 uppercase tracking-wider">Contacts</p>
+                      {searchResults.users.map((user) => (
+                        <button
+                          key={user._id}
+                          onClick={() => openChatWithUser(user)}
+                          className="w-full flex items-center gap-3 p-3 hover:bg-gray-50 dark:hover:bg-zinc-900/50 transition-colors"
+                        >
+                          <div className="w-10 h-10 rounded-full bg-gray-200 flex items-center justify-center text-gray-600 font-bold dark:bg-zinc-800 dark:text-gray-400">
+                            {user.name.charAt(0).toUpperCase()}
+                          </div>
+                          <div className="text-left">
+                            <p className="text-sm font-semibold text-gray-900 dark:text-white">{user.name}</p>
+                            <p className="text-xs text-gray-400">{user.email}</p>
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Messages Results */}
+                  {searchResults.messages.length > 0 && (
+                    <div className="py-2 border-t border-gray-100 dark:border-zinc-800">
+                      <p className="px-4 py-1 text-xs font-bold text-gray-500 uppercase tracking-wider">Messages</p>
+                      {searchResults.messages.map((msg) => {
+                        // Figure out chat name
+                        const chatObj = msg.chat;
+                        const otherUsers = chatObj?.users?.filter((u: any) => u._id !== session?.user?.id) || [];
+                        const chatName = chatObj?.isGroup ? chatObj.groupName : (otherUsers[0]?.name || "Unknown");
+                        
+                        return (
+                          <button
+                            key={msg._id}
+                            onClick={() => jumpToMessage(msg)}
+                            className="w-full flex items-start gap-3 p-3 hover:bg-gray-50 dark:hover:bg-zinc-900/50 transition-colors text-left"
+                          >
+                            <div className="w-10 h-10 rounded-full bg-blue-100 flex-shrink-0 flex items-center justify-center text-blue-600 dark:bg-blue-900/30">
+                              <MessageCircle className="h-5 w-5" />
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex justify-between">
+                                <p className="text-xs font-semibold text-gray-900 dark:text-white truncate">{chatName}</p>
+                                <span className="text-[10px] text-gray-400">{formatChatTime(msg.createdAt)}</span>
+                              </div>
+                              <p className="text-sm text-gray-600 dark:text-zinc-300 mt-0.5 break-words line-clamp-2">
+                                {msg.sender?._id === session?.user?.id ? "You: " : `${msg.sender?.name}: `}
+                                {msg.content}
+                              </p>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
+              ) : (
+                <>
+                  {chats.length === 0 ? (
+                    <div className="text-center py-12 px-4">
+                      <MessageCircle className="h-10 w-10 text-gray-300 dark:text-zinc-600 mx-auto mb-3" />
+                      <p className="text-sm text-gray-400 dark:text-zinc-500">No chats yet</p>
+                      <button onClick={() => setSearchMode(true)} className="text-sm text-blue-600 mt-2 hover:underline">
+                        Start a new chat
+                      </button>
+                    </div>
+                  ) : (
+                    chats.map((chat) => (
+                      <button
+                        key={chat._id || chat.otherUser?._id}
+                        onClick={() => { setSelectedChat(chat); setMobileView("chat"); }}
+                        className={`w-full flex items-center gap-3 px-3 py-3 transition-colors border-b border-gray-50 dark:border-zinc-800/50 ${
+                          selectedChat?.otherUser?._id === chat.otherUser?._id
+                            ? "bg-blue-50 dark:bg-zinc-900"
+                            : "hover:bg-gray-50 dark:hover:bg-zinc-900/50 active:bg-gray-100 dark:active:bg-zinc-900"
+                        }`}
+                      >
+                        <div className="relative flex-shrink-0">
+                          <div className="w-11 h-11 rounded-full bg-gray-200 flex items-center justify-center text-gray-600 font-bold dark:bg-zinc-800 dark:text-gray-400">
+                            {chat.chatInitial}
+                          </div>
+                          {chat.isOnline && (
+                            <div className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-green-500 border-2 border-white dark:border-zinc-950"></div>
+                          )}
+                        </div>
+                        <div className="flex-1 min-w-0 text-left">
+                          <div className="flex justify-between items-baseline">
+                            <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">
+                              {chat.chatName}
+                            </p>
+                            {chat.latestMessage?.createdAt && (
+                              <span className={`text-[10px] flex-shrink-0 ml-2 ${
+                                chat.unreadCount > 0 ? "text-blue-600 font-semibold" : "text-gray-400 dark:text-zinc-500"
+                              }`}>
+                                {formatChatTime(chat.latestMessage.createdAt)}
+                              </span>
+                            )}
+                          </div>
+                          <div className="flex justify-between items-center mt-0.5">
+                            <p className="text-xs text-gray-500 dark:text-zinc-400 truncate pr-2">
+                              {getPreview(chat)}
+                            </p>
+                            {chat.unreadCount > 0 && (
+                              <span className="bg-blue-600 text-white text-[10px] font-bold min-w-[18px] h-[18px] flex items-center justify-center rounded-full flex-shrink-0">
+                                {chat.unreadCount}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </button>
+                    ))
+                  )}
+                </>
+              )}
+            </div>
+          </>
+        ) : (
+          <>
+            {/* Calls Header */}
+            <div className="h-16 flex items-center justify-between px-4 border-b border-gray-200 dark:border-zinc-800 flex-shrink-0">
+              <div className="flex items-center gap-2">
+                <Phone className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+                <h1 className="text-lg font-bold text-gray-900 dark:text-white">Calls</h1>
+              </div>
+            </div>
+
+            {/* Search Calls Bar */}
+            <div className="px-3 py-2 flex-shrink-0">
+              <div className="flex items-center gap-2 bg-gray-100 dark:bg-zinc-800 rounded-lg px-3 py-2">
+                <Search className="h-4 w-4 text-gray-400" />
+                <input
+                  type="text"
+                  value={callsSearchQuery}
+                  onChange={(e) => setCallsSearchQuery(e.target.value)}
+                  placeholder="Search calls..."
+                  className="flex-1 bg-transparent text-sm outline-none dark:text-white"
+                />
+                {callsSearchQuery && (
+                  <button onClick={() => setCallsSearchQuery("")}>
+                    <X className="h-4 w-4 text-gray-400" />
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* Profile card */}
+            <div className="px-4 py-3 bg-gray-50 dark:bg-zinc-900/50 border-b border-gray-100 dark:border-zinc-800 flex-shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-9 h-9 rounded-full bg-blue-100 flex items-center justify-center text-blue-600 font-bold text-sm dark:bg-blue-900/30">
+                  {session?.user?.name?.charAt(0).toUpperCase()}
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-gray-900 dark:text-white">{session?.user?.name}</p>
+                  <p className="text-xs text-green-600 dark:text-green-400 flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-500"></span>
+                    Online
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Calls List */}
+            <div className="flex-1 overflow-y-auto">
+              {calls.filter((call) => {
+                if (!callsSearchQuery.trim()) return true;
+                const isGroup = !!call.chatId;
+                const name = isGroup
+                  ? (call.chatId?.groupName || "Group Call")
+                  : (call.caller?._id === session?.user?.id
+                      ? (call.participants?.[0]?.name || "Unknown")
+                      : (call.caller?.name || "Unknown"));
+                return name.toLowerCase().includes(callsSearchQuery.toLowerCase());
+              }).length === 0 ? (
+                <div className="text-center py-12 px-4">
+                  <Phone className="h-10 w-10 text-gray-300 dark:text-zinc-600 mx-auto mb-3" />
+                  <p className="text-sm text-gray-400 dark:text-zinc-500">No calls logged</p>
+                </div>
+              ) : (
+                calls
+                  .filter((call) => {
+                    if (!callsSearchQuery.trim()) return true;
+                    const isGroup = !!call.chatId;
+                    const name = isGroup
+                      ? (call.chatId?.groupName || "Group Call")
+                      : (call.caller?._id === session?.user?.id
+                          ? (call.participants?.[0]?.name || "Unknown")
+                          : (call.caller?.name || "Unknown"));
+                    return name.toLowerCase().includes(callsSearchQuery.toLowerCase());
+                  })
+                  .map((call) => {
+                    const isGroup = !!call.chatId;
+                    const isOutgoing = call.caller?._id === session?.user?.id;
+                    const name = isGroup
+                      ? (call.chatId?.groupName || "Group Call")
+                      : (isOutgoing
+                          ? (call.participants?.[0]?.name || "Unknown")
+                          : (call.caller?.name || "Unknown"));
+                    const initials = name.charAt(0).toUpperCase();
+
+                    const callTimeFormatted = formatChatTime(call.startedAt) + " • " + format(new Date(call.startedAt), "hh:mm a");
+                    const durationStr = call.duration
+                      ? (call.duration >= 60
+                          ? `${Math.floor(call.duration / 60)}m ${call.duration % 60}s`
+                          : `${call.duration}s`)
+                      : null;
+
+                    const handleCallItemClick = () => {
+                      if (isGroup) {
+                        window.dispatchEvent(new CustomEvent("zline:initiate_group_call", {
+                          detail: {
+                            chatId: call.chatId?._id || call.chatId,
+                            groupName: name,
+                            callType: call.type
+                          }
+                        }));
+                      } else {
+                        const targetUser = isOutgoing ? call.participants?.[0] : call.caller;
+                        if (targetUser?._id) {
+                          window.dispatchEvent(new CustomEvent("zline:initiate_call", {
+                            detail: {
+                              calleeId: targetUser._id,
+                              calleeName: name,
+                              callType: call.type
+                            }
+                          }));
+                        }
+                      }
+                    };
+
+                    let statusIcon = null;
+                    let statusText = "";
+                    let statusColorClass = "text-gray-500 dark:text-zinc-400";
+                    
+                    if (call.status === "missed") {
+                      statusIcon = <PhoneMissed className="w-3.5 h-3.5 text-red-500 flex-shrink-0" />;
+                      statusText = isOutgoing ? "Unanswered" : "Missed";
+                      statusColorClass = "text-red-500 font-semibold";
+                    } else if (call.status === "rejected") {
+                      statusIcon = <PhoneMissed className="w-3.5 h-3.5 text-red-400 flex-shrink-0" />;
+                      statusText = "Declined";
+                    } else if (call.status === "cancelled") {
+                      statusIcon = <PhoneOutgoing className="w-3.5 h-3.5 text-gray-400 flex-shrink-0" />;
+                      statusText = "Cancelled";
+                    } else {
+                      if (isOutgoing) {
+                        statusIcon = <PhoneOutgoing className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />;
+                        statusText = "Outgoing";
+                      } else {
+                        statusIcon = <PhoneIncoming className="w-3.5 h-3.5 text-green-500 flex-shrink-0" />;
+                        statusText = "Incoming";
+                      }
+                    }
+
+                    return (
+                      <div
+                        key={call._id}
+                        className="w-full flex items-center justify-between px-3 py-3 border-b border-gray-50 dark:border-zinc-800/50 hover:bg-gray-50 dark:hover:bg-zinc-900/50 transition-colors"
+                      >
+                        <div className="flex items-center gap-3 min-w-0 flex-1">
+                          <div className="relative flex-shrink-0">
+                            <div className="w-11 h-11 rounded-full bg-gray-200 flex items-center justify-center text-gray-600 font-bold dark:bg-zinc-800 dark:text-gray-400">
+                              {initials}
+                            </div>
+                            <div className="absolute bottom-0 right-0 w-4 h-4 rounded-full bg-gray-100 dark:bg-zinc-800 flex items-center justify-center border border-white dark:border-zinc-950">
+                              {call.type === "video" ? (
+                                <Video className="w-2.5 h-2.5 text-blue-500" />
+                              ) : (
+                                <Phone className="w-2.5 h-2.5 text-green-500" />
+                              )}
+                            </div>
+                          </div>
+                          <div className="min-w-0 text-left">
+                            <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">
+                              {name}
+                            </p>
+                            <div className="flex items-center gap-1.5 mt-0.5">
+                              {statusIcon}
+                              <span className={`text-xs ${statusColorClass}`}>
+                                {statusText} {isGroup ? "Group Call" : `${call.type === "video" ? "Video" : "Voice"}`}
+                              </span>
+                            </div>
+                            <p className="text-[10px] text-gray-400 dark:text-zinc-500 mt-0.5">
+                              {callTimeFormatted} {durationStr && `• (${durationStr})`}
+                            </p>
+                          </div>
+                        </div>
+                        
+                        <button
+                          onClick={handleCallItemClick}
+                          className="p-2 text-gray-400 hover:text-blue-600 dark:hover:text-blue-400 transition-colors cursor-pointer flex-shrink-0"
+                          title="Call back"
+                        >
+                          {call.type === "video" ? (
+                            <Video className="w-5 h-5" />
+                          ) : (
+                            <PhoneCall className="w-5 h-5" />
+                          )}
+                        </button>
+                      </div>
+                    );
+                  })
+              )}
+            </div>
+          </>
+        )}
+
+        {/* Bottom Tab Navigation Bar */}
+        <div className="h-14 border-t border-gray-200 dark:border-zinc-800 flex items-center justify-around bg-gray-50 dark:bg-zinc-950 px-2 flex-shrink-0">
+          <button
+            onClick={() => setSidebarTab("chats")}
+            className={`flex flex-col items-center gap-0.5 flex-1 py-1 text-xs font-medium transition-colors cursor-pointer ${
+              sidebarTab === "chats"
+                ? "text-blue-600 dark:text-blue-400"
+                : "text-gray-400 dark:text-zinc-500 hover:text-gray-600 dark:hover:text-zinc-400"
+            }`}
+          >
+            <MessageSquare className="w-5 h-5" />
+            <span>Chats</span>
+          </button>
+          <button
+            onClick={() => setSidebarTab("calls")}
+            className={`flex flex-col items-center gap-0.5 flex-1 py-1 text-xs font-medium transition-colors cursor-pointer ${
+              sidebarTab === "calls"
+                ? "text-blue-600 dark:text-blue-400"
+                : "text-gray-400 dark:text-zinc-500 hover:text-gray-600 dark:hover:text-zinc-400"
+            }`}
+          >
+            <Phone className="w-5 h-5" />
+            <span>Calls</span>
+          </button>
         </div>
       </div>
 
@@ -1395,7 +1673,7 @@ export default function Home() {
             {/* Messages — scrollable area with momentum scrolling on iOS */}
             <div className="flex-1 overflow-y-auto p-3 md:p-6 space-y-3 scroll-touch">
               {filteredMessages.map((message, index) => {
-                const isMe = message.sender === session?.user?.id;
+                const isMe = message.sender === session?.user?.id || message.sender?._id === session?.user?.id;
                 const isHighlighted = localSearchQuery.trim() &&
                   message.content?.toLowerCase().includes(localSearchQuery.toLowerCase());
                 const expiresAt = message.expiresAt ? new Date(message.expiresAt) : null;
@@ -1503,7 +1781,7 @@ export default function Home() {
 
                 return (
                   <div key={message._id || index} className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
-                    <div className="relative group">
+                    <div className="relative group max-w-[70%] md:max-w-[60%]">
                       {/* Reaction trigger button — visible on hover (desktop) */}
                       {message._id && (
                         <button
@@ -1530,7 +1808,7 @@ export default function Home() {
                         </div>
                       )}
 
-                      <div className={`max-w-[70%] rounded-2xl overflow-hidden ${
+                      <div className={`w-full rounded-2xl overflow-hidden ${
                         isMe
                           ? "bg-blue-600 text-white rounded-br-sm"
                           : "bg-white text-gray-900 rounded-bl-sm shadow-sm dark:bg-zinc-800 dark:text-white"
