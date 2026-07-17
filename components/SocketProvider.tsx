@@ -29,31 +29,31 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
     let socketInstance: Socket | null = null;
 
     const initSocket = async () => {
-      const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "";
-      if (!socketUrl) {
-        try {
-          await fetch("/api/socket/io");
-        } catch (error) {
-          console.error("Socket initialization failed", error);
-        }
-      }
+      const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:3001";
+      console.log("Initializing socket connection to:", socketUrl);
 
-      socketInstance = io(socketUrl || undefined, {
-        path: "/api/socket/io",
-        addTrailingSlash: false,
+      socketInstance = io(socketUrl, {
+        transports: ["websocket", "polling"],
+        reconnection: true,
+        reconnectionAttempts: Infinity,
+        reconnectionDelay: 1000,
       });
 
       socketInstance.on("connect", () => {
-        console.log("Socket connected!");
+        console.log("Socket connected successfully with ID:", socketInstance?.id);
         setIsConnected(true);
         if (session?.user?.id) {
           socketInstance?.emit("join", session.user.id);
         }
       });
 
-      socketInstance.on("disconnect", () => {
-        console.log("Socket disconnected!");
+      socketInstance.on("disconnect", (reason) => {
+        console.warn("Socket disconnected. Reason:", reason);
         setIsConnected(false);
+      });
+
+      socketInstance.on("connect_error", (error) => {
+        console.error("Socket connection error:", error.message);
       });
 
       setSocket(socketInstance);
@@ -63,6 +63,7 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
 
     return () => {
       if (socketInstance) {
+        console.log("Cleaning up socket connection...");
         socketInstance.disconnect();
       }
     };

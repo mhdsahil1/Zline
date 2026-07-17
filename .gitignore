@@ -44,3 +44,5 @@ AGENTS.md
 CLAUDE.md
 
 test-db.js
+
+socket-server/
