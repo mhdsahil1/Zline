@@ -45,6 +45,11 @@ export async function GET(req: Request) {
 
     const messages = await Message.find({ chat: chat._id })
       .populate("sender", "name image")
+      .populate({
+        path: "replyTo",
+        select: "content sender type fileName",
+        populate: { path: "sender", select: "name" },
+      })
       .sort({
         createdAt: 1,
       });
@@ -93,7 +98,7 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json();
-    const { receiverId, chatId, content, type = "text", fileUrl, fileName, fileSize, isEncrypted, encAesKey, encAesKeyForSender, iv } = body;
+    const { receiverId, chatId, content, type = "text", fileUrl, fileName, fileSize, isEncrypted, encAesKey, encAesKeyForSender, iv, replyTo, voiceDuration } = body;
 
     if (!receiverId && !chatId) {
       return NextResponse.json(
@@ -174,14 +179,22 @@ export async function POST(req: Request) {
       fileUrl,
       fileName,
       fileSize,
+      voiceDuration,
       expiresAt,
+      replyTo: replyTo || undefined,
       isEncrypted: !!isEncrypted,
       encAesKey,
       encAesKeyForSender,
       iv,
     });
 
-    const populatedMessage = await Message.findById(newMessage._id).populate("sender", "name image");
+    const populatedMessage = await Message.findById(newMessage._id)
+      .populate("sender", "name image")
+      .populate({
+        path: "replyTo",
+        select: "content sender type fileName",
+        populate: { path: "sender", select: "name" },
+      });
 
     chat.latestMessage = newMessage._id;
     await chat.save();

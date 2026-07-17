@@ -30,7 +30,9 @@ export interface IMessage extends Document {
   fileUrl?: string;
   fileName?: string;
   fileSize?: number;
+  voiceDuration?: number;
   poll?: IPoll;
+  replyTo?: mongoose.Types.ObjectId;
   isEdited: boolean;
   deletedFor: mongoose.Types.ObjectId[];
   deletedForEveryone: boolean;
@@ -96,7 +98,9 @@ const messageSchema = new Schema<IMessage>(
     fileUrl: { type: String },
     fileName: { type: String },
     fileSize: { type: Number },
+    voiceDuration: { type: Number },
     poll: pollSchema,
+    replyTo: { type: Schema.Types.ObjectId, ref: "Message" },
     isEdited: { type: Boolean, default: false },
     deletedFor: [{ type: Schema.Types.ObjectId, ref: "User" }],
     deletedForEveryone: { type: Boolean, default: false },

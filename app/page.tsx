@@ -2,20 +2,31 @@
 
 import { useSession, signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { useEffect, useState, useRef, useCallback } from "react";
+import { useEffect, useState, useRef, useCallback, Fragment } from "react";
 import { useSocket } from "@/components/SocketProvider";
 import {
   MessageCircle, LogOut, Send, Loader2, Check, CheckCheck,
   Search, ArrowLeft, Plus, X, Paperclip, Mic, StopCircle, Download, FileText,
   Phone, Video, BarChart2, ChevronRight, CheckCircle2, SmilePlus,
   Image as ImageIcon, Music, Film, Code2, Archive, File, Users,
-  PhoneCall, PhoneMissed, PhoneIncoming, PhoneOutgoing, MessageSquare
+  PhoneCall, PhoneMissed, PhoneIncoming, PhoneOutgoing, MessageSquare,
+  Pin, Star, Settings, UserX
 } from "lucide-react";
 import { format, isToday, isYesterday, formatDistanceToNow } from "date-fns";
 import CallModal from "@/components/CallModal";
 import GroupCallModal from "@/components/GroupCallModal";
 import Logo from "@/components/Logo";
 import { generateE2EKeypair, exportKeyToJwk, encryptMessage, decryptMessage } from "@/lib/crypto";
+
+// Import custom components for the 7 features
+import MessageActions from "@/components/MessageActions";
+import ReplyPreview from "@/components/ReplyPreview";
+import VoicePlayer from "@/components/VoicePlayer";
+import VoiceRecorder from "@/components/VoiceRecorder";
+import ChatSearch from "@/components/ChatSearch";
+import PinnedMessages from "@/components/PinnedMessages";
+import StarredMessages from "@/components/StarredMessages";
+import SettingsPanel from "@/components/SettingsPanel";
 
 function formatChatTime(date: string | Date) {
   const d = new Date(date);
@@ -150,6 +161,20 @@ export default function Home() {
   // E2EE States
   const [recipientPublicKey, setRecipientPublicKey] = useState<string | null>(null);
 
+  // New features states
+  const [replyingTo, setReplyingTo] = useState<any | null>(null);
+  const [activeMessageActionId, setActiveMessageActionId] = useState<string | null>(null);
+  const [editingMessage, setEditingMessage] = useState<any | null>(null);
+  const [showPinnedPanel, setShowPinnedPanel] = useState(false);
+  const [showStarredPanel, setShowStarredPanel] = useState(false);
+  const [showSettingsPanel, setShowSettingsPanel] = useState(false);
+  const [starredMessageIds, setStarredMessageIds] = useState<string[]>([]);
+  const [blockedUsers, setBlockedUsers] = useState<string[]>([]);
+  const [userSettings, setUserSettings] = useState<any>(null);
+
+  // Refs for message elements for scrolling
+  const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
+
   // Load or generate E2EE keys
   useEffect(() => {
     if (status !== "authenticated" || !session?.user?.id) return;
@@ -238,6 +263,82 @@ export default function Home() {
   useEffect(() => {
     if (status === "unauthenticated") router.push("/login");
   }, [status, router]);
+
+  // Fetch settings, blocked users, and starred messages on load
+  useEffect(() => {
+    if (status === "authenticated" && session?.user?.id) {
+      // 1. Settings
+      fetch("/api/users/settings")
+        .then((res) => {
+          if (res.ok) return res.json();
+          return null;
+        })
+        .then((data) => {
+          if (data?.settings) setUserSettings(data.settings);
+        })
+        .catch((err) => console.error("Error fetching settings:", err));
+
+      // 2. Blocked Users
+      fetch("/api/users/block")
+        .then((res) => {
+          if (res.ok) return res.json();
+          return [];
+        })
+        .then((data) => {
+          if (Array.isArray(data)) setBlockedUsers(data.map((u: any) => u._id));
+        })
+        .catch((err) => console.error("Error fetching blocked users:", err));
+
+      // 3. Starred Messages
+      fetch("/api/messages/star")
+        .then((res) => {
+          if (res.ok) return res.json();
+          return [];
+        })
+        .then((data) => {
+          if (Array.isArray(data)) {
+            setStarredMessageIds(data.map((item: any) => item.messageId?._id).filter(Boolean));
+          }
+        })
+        .catch((err) => console.error("Error fetching starred messages:", err));
+    }
+  }, [status, session?.user?.id]);
+
+  // Apply theme styling reactively
+  useEffect(() => {
+    if (!userSettings?.theme) return;
+    const root = window.document.documentElement;
+    const applyTheme = (theme: string) => {
+      if (theme === "dark" || (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches)) {
+        root.classList.add("dark");
+      } else {
+        root.classList.remove("dark");
+      }
+    };
+    applyTheme(userSettings.theme);
+
+    if (userSettings.theme === "system") {
+      const media = window.matchMedia("(prefers-color-scheme: dark)");
+      const listener = (e: MediaQueryListEvent) => {
+        if (e.matches) root.classList.add("dark");
+        else root.classList.remove("dark");
+      };
+      media.addEventListener("change", listener);
+      return () => media.removeEventListener("change", listener);
+    }
+  }, [userSettings?.theme]);
+
+  // Scroll to a specific message and flash highlight it
+  const handleScrollToMessage = useCallback((messageId: string) => {
+    const el = messageRefs.current[messageId];
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "center" });
+      el.classList.add("ring-4", "ring-yellow-400", "transition-all", "duration-500");
+      setTimeout(() => {
+        el.classList.remove("ring-4", "ring-yellow-400");
+      }, 2000);
+    }
+  }, []);
 
   // Decrypts an array of messages using our private key
   const decryptMessagesArray = useCallback(async (msgs: any[]) => {
@@ -601,6 +702,63 @@ export default function Home() {
       }
     };
 
+    // Message edit socket handler
+    const handleMessageEdited = async ({ chatId, message }: { chatId?: string; message: any }) => {
+      let decryptedMsg = message;
+      if (message.isEncrypted) {
+        const decryptedArr = await decryptMessagesArray([message]);
+        decryptedMsg = decryptedArr[0];
+      }
+      setMessages((prev) => prev.map((m) => m._id === decryptedMsg._id ? decryptedMsg : m));
+      setChats((prev) => prev.map((c) => {
+        const isThisChat = chatId ? c._id === chatId : (c.otherUser?._id === decryptedMsg.sender || c.otherUser?._id === decryptedMsg.chat);
+        if (isThisChat && c.latestMessage?._id === decryptedMsg._id) {
+          return {
+            ...c,
+            latestMessage: { ...c.latestMessage, content: decryptedMsg.content },
+          };
+        }
+        return c;
+      }));
+    };
+
+    // Message delete socket handler
+    const handleMessageDeleted = ({ chatId, messageId }: { chatId?: string; messageId: string }) => {
+      setMessages((prev) => prev.map((m) => m._id === messageId ? { ...m, deletedForEveryone: true, content: "" } : m));
+      setChats((prev) => prev.map((c) => {
+        if (c.latestMessage?._id === messageId) {
+          return {
+            ...c,
+            latestMessage: { ...c.latestMessage, content: "This message was deleted", deletedForEveryone: true },
+          };
+        }
+        return c;
+      }));
+    };
+
+    // Message pin/unpin socket handlers
+    const handleMessagePinned = ({ chatId, message, pinnedCount }: { chatId?: string; message: any; pinnedCount: number }) => {
+      setSelectedChat((prev: any) => {
+        const isThisChat = prev && (chatId ? prev._id === chatId : (prev.otherUser?._id === message.sender || prev.otherUser?._id === message.chat));
+        if (isThisChat) {
+          const list = prev.pinnedMessages || [];
+          if (!list.includes(message._id)) {
+            return { ...prev, pinnedMessages: [...list, message._id] };
+          }
+        }
+        return prev;
+      });
+    };
+
+    const handleMessageUnpinned = ({ chatId, messageId, pinnedCount }: { chatId?: string; messageId: string; pinnedCount: number }) => {
+      setSelectedChat((prev: any) => {
+        if (prev) {
+          return { ...prev, pinnedMessages: (prev.pinnedMessages || []).filter((id: string) => id !== messageId) };
+        }
+        return prev;
+      });
+    };
+
     const handleRefreshCalls = () => {
       fetchCallsRef.current();
     };
@@ -618,6 +776,10 @@ export default function Home() {
     socket.on("call_answered", handleRefreshCalls);
     socket.on("call_rejected", handleRefreshCalls);
     socket.on("call_ended", handleRefreshCalls);
+    socket.on("message_edited", handleMessageEdited);
+    socket.on("message_deleted", handleMessageDeleted);
+    socket.on("message_pinned", handleMessagePinned);
+    socket.on("message_unpinned", handleMessageUnpinned);
 
     return () => {
       socket.off("receive_message", handleReceiveMessage);
@@ -633,8 +795,12 @@ export default function Home() {
       socket.off("call_answered", handleRefreshCalls);
       socket.off("call_rejected", handleRefreshCalls);
       socket.off("call_ended", handleRefreshCalls);
+      socket.off("message_edited", handleMessageEdited);
+      socket.off("message_deleted", handleMessageDeleted);
+      socket.off("message_pinned", handleMessagePinned);
+      socket.off("message_unpinned", handleMessageUnpinned);
     };
-  }, [socket]); // stable — never re-registers due to selectedChat/session changes
+  }, [socket, decryptMessagesArray]); // stable — never re-registers due to selectedChat/session changes
 
   const scrollToBottom = () => {
     setTimeout(() => messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }), 100);
@@ -730,6 +896,120 @@ export default function Home() {
     }
   };
 
+  const handleDeleteMessage = async (messageId: string) => {
+    try {
+      const res = await fetch("/api/messages/delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageId }),
+      });
+      if (res.ok) {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m._id === messageId
+              ? { ...m, deletedForEveryone: true, content: "", fileUrl: undefined, fileName: undefined }
+              : m
+          )
+        );
+        if (socket) {
+          if (selectedChat.isGroup) {
+            socket.emit("message_deleted", { chatId: selectedChat._id, messageId });
+          } else if (selectedChat.otherUser?._id) {
+            socket.emit("message_deleted", { targetUserId: selectedChat.otherUser._id, messageId });
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Failed to delete message:", err);
+    }
+  };
+
+  const handlePinMessage = async (messageId: string) => {
+    if (!selectedChat) return;
+    try {
+      const res = await fetch("/api/messages/pin", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageId, chatId: selectedChat._id }),
+      });
+      if (res.ok) {
+        setSelectedChat((prev: any) => {
+          if (!prev) return prev;
+          const pins = prev.pinnedMessages || [];
+          if (!pins.includes(messageId)) {
+            return { ...prev, pinnedMessages: [...pins, messageId] };
+          }
+          return prev;
+        });
+        if (socket) {
+          if (selectedChat.isGroup) {
+            socket.emit("message_pinned", { chatId: selectedChat._id, messageId });
+          } else if (selectedChat.otherUser?._id) {
+            socket.emit("message_pinned", { targetUserId: selectedChat.otherUser._id, messageId, chatId: selectedChat._id });
+          }
+        }
+      } else {
+        const err = await res.json();
+        alert(err.message || "Failed to pin message");
+      }
+    } catch (err) {
+      console.error("Failed to pin message:", err);
+    }
+  };
+
+  const handleUnpinMessage = async (messageId: string) => {
+    if (!selectedChat) return;
+    try {
+      const res = await fetch(`/api/messages/pin?messageId=${messageId}&chatId=${selectedChat._id}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        setSelectedChat((prev: any) => {
+          if (!prev) return prev;
+          return { ...prev, pinnedMessages: (prev.pinnedMessages || []).filter((id: string) => id !== messageId) };
+        });
+        if (socket) {
+          if (selectedChat.isGroup) {
+            socket.emit("message_unpinned", { chatId: selectedChat._id, messageId });
+          } else if (selectedChat.otherUser?._id) {
+            socket.emit("message_unpinned", { targetUserId: selectedChat.otherUser._id, messageId, chatId: selectedChat._id });
+          }
+        }
+      }
+    } catch (err) {
+      console.error("Failed to unpin message:", err);
+    }
+  };
+
+  const handleStarMessage = async (messageId: string) => {
+    if (!selectedChat) return;
+    try {
+      const res = await fetch("/api/messages/star", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ messageId, chatId: selectedChat._id }),
+      });
+      if (res.ok) {
+        setStarredMessageIds((prev) => [...prev, messageId]);
+      }
+    } catch (err) {
+      console.error("Failed to star message:", err);
+    }
+  };
+
+  const handleUnstarMessage = async (messageId: string) => {
+    try {
+      const res = await fetch(`/api/messages/star?messageId=${messageId}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        setStarredMessageIds((prev) => prev.filter((id) => id !== messageId));
+      }
+    } catch (err) {
+      console.error("Failed to unstar message:", err);
+    }
+  };
+
   // Core: send a message object (text or media) to the API + socket
   const dispatchMessage = async (payload: {
     content?: string;
@@ -737,6 +1017,8 @@ export default function Home() {
     fileUrl?: string;
     fileName?: string;
     fileSize?: number;
+    replyTo?: string;
+    voiceDuration?: number;
   }) => {
     if (!selectedChat) return;
     setMediaError(null);
@@ -762,6 +1044,11 @@ export default function Home() {
             console.error("Encryption failed, sending unencrypted fallback:", cryptoErr);
           }
         }
+      }
+
+      if (replyingTo) {
+        body.replyTo = replyingTo._id;
+        setReplyingTo(null);
       }
 
       const res = await fetch("/api/messages", {
@@ -834,6 +1121,26 @@ export default function Home() {
     }
   };
 
+  const handleVoiceSend = async (blob: Blob, duration: number) => {
+    setIsUploading(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", blob, "voice-message.webm");
+      const res = await fetch("/api/upload", { method: "POST", body: formData });
+      if (!res.ok) {
+        const err = await res.json();
+        setMediaError(err.message || "Upload failed");
+        return;
+      }
+      const { fileUrl, fileName, fileSize, type } = await res.json();
+      await dispatchMessage({ content: "", type, fileUrl, fileName, fileSize, voiceDuration: duration });
+    } catch {
+      setMediaError("Failed to send voice message.");
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
   // Send text message
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -848,7 +1155,59 @@ export default function Home() {
         socket.emit("stop_typing", { receiverId: selectedChat.otherUser._id, senderId: session?.user?.id });
       }
     }
-    await dispatchMessage({ content, type: "text" });
+
+    if (editingMessage) {
+      const msgToEdit = editingMessage;
+      setEditingMessage(null);
+      try {
+        const body: any = { messageId: msgToEdit._id, content };
+        
+        // Handle E2EE re-encryption for edited message
+        if (msgToEdit.isEncrypted && recipientPublicKey) {
+          try {
+            const myPublicKey = session?.user?.id ? localStorage.getItem(`zline_e2e_public_key_${session.user.id}`) : null;
+            const encrypted = await encryptMessage(content, recipientPublicKey, myPublicKey || undefined);
+            body.content = encrypted.encryptedContent;
+            body.isEncrypted = true;
+            body.encAesKey = encrypted.encAesKey;
+            body.encAesKeyForSender = encrypted.encAesKeyForSender;
+            body.iv = encrypted.iv;
+          } catch (cryptoErr) {
+            console.error("Encryption failed for E2EE edit:", cryptoErr);
+          }
+        }
+
+        const res = await fetch("/api/messages/edit", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+        });
+
+        if (res.ok) {
+          const data = await res.json();
+          let decryptedMsg = data.message;
+          if (decryptedMsg.isEncrypted) {
+            const decryptedArr = await decryptMessagesArray([decryptedMsg]);
+            decryptedMsg = decryptedArr[0];
+          }
+          setMessages((prev) =>
+            prev.map((m) => (m._id === decryptedMsg._id ? decryptedMsg : m))
+          );
+          // Broadcast socket event
+          if (socket) {
+            if (selectedChat.isGroup) {
+              socket.emit("message_edited", { chatId: selectedChat._id, message: data.message });
+            } else if (selectedChat.otherUser?._id) {
+              socket.emit("message_edited", { targetUserId: selectedChat.otherUser._id, message: data.message });
+            }
+          }
+        }
+      } catch (err) {
+        console.error("Failed to edit message:", err);
+      }
+    } else {
+      await dispatchMessage({ content, type: "text" });
+    }
   };
 
   // File selection
@@ -964,52 +1323,7 @@ export default function Home() {
     return <File className="w-4 h-4 text-gray-500" />;
   };
 
-  // Voice recording
-  const startRecording = async () => {
-    if (!selectedChat?.otherUser) return;
-    setMediaError(null);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const recorder = new MediaRecorder(stream);
-      audioChunksRef.current = [];
-      recorder.ondataavailable = (e) => { if (e.data.size > 0) audioChunksRef.current.push(e.data); };
-      recorder.onstop = async () => {
-        stream.getTracks().forEach((t) => t.stop());
-        const blob = new Blob(audioChunksRef.current, { type: "audio/webm" });
-        if (blob.size > 100 * 1024 * 1024) {
-          setMediaError("Voice message exceeds 100MB.");
-          return;
-        }
-        setIsUploading(true);
-        try {
-          const formData = new FormData();
-          formData.append("file", blob, "voice-message.webm");
-          const res = await fetch("/api/upload", { method: "POST", body: formData });
-          if (!res.ok) {
-            const err = await res.json();
-            setMediaError(err.message || "Upload failed");
-            return;
-          }
-          const { fileUrl, fileName, fileSize, type } = await res.json();
-          await dispatchMessage({ content: "", type, fileUrl, fileName, fileSize });
-        } catch {
-          setMediaError("Failed to send voice message.");
-        } finally {
-          setIsUploading(false);
-        }
-      };
-      recorder.start();
-      mediaRecorderRef.current = recorder;
-      setIsRecording(true);
-    } catch {
-      setMediaError("Microphone access denied. Please allow microphone permissions.");
-    }
-  };
 
-  const stopRecording = () => {
-    mediaRecorderRef.current?.stop();
-    setIsRecording(false);
-  };
 
   // Typing
   const handleTyping = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1105,10 +1419,7 @@ export default function Home() {
     return prefix + (text.length > 35 ? text.slice(0, 35) + "…" : text);
   };
 
-  const filteredMessages = messages.filter(m => 
-    !localSearchQuery.trim() || 
-    m.content?.toLowerCase().includes(localSearchQuery.toLowerCase())
-  );
+  const filteredMessages = messages;
 
   return (
     <div className="flex h-screen-mobile bg-gray-100 dark:bg-black overflow-hidden">
@@ -1152,14 +1463,17 @@ export default function Home() {
                     <Logo className="h-7 w-auto" />
                   </div>
                   <div className="flex items-center gap-1">
-                    <button onClick={() => setSearchMode(true)} className="p-2 text-gray-500 hover:text-blue-600 transition-colors" title="New chat">
+                    <button onClick={() => setSearchMode(true)} className="p-1.5 text-gray-500 hover:text-blue-600 transition-colors" title="New chat">
                       <Plus className="h-5 w-5" />
                     </button>
-                    <button onClick={openCreateGroup} className="p-2 text-gray-500 hover:text-blue-600 transition-colors" title="New group">
+                    <button onClick={openCreateGroup} className="p-1.5 text-gray-500 hover:text-blue-600 transition-colors" title="New group">
                       <Users className="h-5 w-5" />
                     </button>
-                    <button onClick={() => signOut()} className="p-2 text-gray-500 hover:text-red-600 transition-colors" title="Log out">
-                      <LogOut className="h-5 w-5" />
+                    <button onClick={() => setShowStarredPanel(true)} className="p-1.5 text-gray-500 hover:text-yellow-500 transition-colors" title="Starred messages">
+                      <Star className="h-5 w-5" />
+                    </button>
+                    <button onClick={() => setShowSettingsPanel(true)} className="p-1.5 text-gray-500 hover:text-blue-500 transition-colors" title="Settings">
+                      <Settings className="h-5 w-5" />
                     </button>
                   </div>
                 </>
@@ -1569,28 +1883,16 @@ export default function Home() {
           </div>
         )}
         {selectedChat ? (
-          <>
+          <Fragment>
             {/* Chat Header */}
             <div className="h-14 md:h-16 bg-white flex flex-col justify-center px-3 md:px-6 border-b border-gray-200 dark:bg-zinc-900 dark:border-zinc-800 shadow-sm z-10 relative flex-shrink-0">
               {localSearchMode ? (
-                <div className="flex items-center gap-2 w-full">
-                  <button onClick={() => { setLocalSearchMode(false); setLocalSearchQuery(""); }}>
-                    <ArrowLeft className="h-5 w-5 text-gray-500 hover:text-gray-700 dark:text-zinc-400" />
-                  </button>
-                  <input
-                    autoFocus
-                    type="text"
-                    value={localSearchQuery}
-                    onChange={(e) => setLocalSearchQuery(e.target.value)}
-                    placeholder="Search in conversation..."
-                    className="flex-1 bg-gray-100 dark:bg-zinc-800 rounded-lg px-3 py-2 text-sm outline-none dark:text-white"
-                  />
-                  {localSearchQuery && (
-                    <button onClick={() => setLocalSearchQuery("")}>
-                      <X className="h-4 w-4 text-gray-400" />
-                    </button>
-                  )}
-                </div>
+                <ChatSearch
+                  messages={messages}
+                  onClose={() => { setLocalSearchMode(false); setLocalSearchQuery(""); }}
+                  onScrollToMessage={handleScrollToMessage}
+                  initialQuery={localSearchQuery}
+                />
               ) : (
                 <div className="flex items-center justify-between w-full">
                   <div className="flex items-center gap-2 md:gap-3">
@@ -1629,6 +1931,40 @@ export default function Home() {
                     </div>
                   </div>
                   <div className="flex items-center gap-0.5 md:gap-1">
+                    {/* Block / Unblock Button (only for 1-to-1 chats) */}
+                    {!selectedChat.isGroup && selectedChat.otherUser?._id && (
+                      <button
+                        onClick={async () => {
+                          const isBlocked = blockedUsers.includes(selectedChat.otherUser._id);
+                          const method = isBlocked ? "DELETE" : "POST";
+                          const res = await fetch(
+                            isBlocked
+                              ? `/api/users/block?userId=${selectedChat.otherUser._id}`
+                              : "/api/users/block",
+                            {
+                              method,
+                              headers: { "Content-Type": "application/json" },
+                              body: isBlocked ? undefined : JSON.stringify({ userId: selectedChat.otherUser._id }),
+                            }
+                          );
+                          if (res.ok) {
+                            setBlockedUsers((prev) =>
+                              isBlocked
+                                ? prev.filter((id) => id !== selectedChat.otherUser._id)
+                                : [...prev, selectedChat.otherUser._id]
+                            );
+                          }
+                        }}
+                        className={`p-2 transition-colors ${
+                          blockedUsers.includes(selectedChat.otherUser._id)
+                            ? "text-red-600 hover:text-red-700"
+                            : "text-gray-500 hover:text-red-500"
+                        }`}
+                        title={blockedUsers.includes(selectedChat.otherUser._id) ? "Unblock user" : "Block user"}
+                      >
+                        <UserX className="h-5 w-5" />
+                      </button>
+                    )}
                     {/* Audio Call */}
                     <button
                       onClick={() => {
@@ -1643,7 +1979,7 @@ export default function Home() {
                     >
                       <Phone className="h-5 w-5" />
                     </button>
-                    {/* Video Call — hide on very small phones to save space */}
+                    {/* Video Call */}
                     <button
                       onClick={() => {
                         if (selectedChat.isGroup) {
@@ -1656,6 +1992,19 @@ export default function Home() {
                       title="Video call"
                     >
                       <Video className="h-5 w-5" />
+                    </button>
+                    {/* Pinned Messages Panel Toggle */}
+                    <button
+                      onClick={() => setShowPinnedPanel(true)}
+                      className="p-2 text-gray-500 hover:text-orange-500 transition-colors relative"
+                      title="Pinned messages"
+                    >
+                      <Pin className="h-5 w-5" />
+                      {selectedChat.pinnedMessages?.length > 0 && (
+                        <span className="absolute top-1 right-1 bg-orange-500 text-white rounded-full text-[8px] w-3.5 h-3.5 flex items-center justify-center font-bold">
+                          {selectedChat.pinnedMessages.length}
+                        </span>
+                      )}
                     </button>
                     {/* Search */}
                     <button 
@@ -1681,7 +2030,7 @@ export default function Home() {
 
                 if (message.deletedForEveryone) {
                   return (
-                    <div key={message._id || index} className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
+                    <div ref={(el) => { messageRefs.current[message._id] = el; }} key={message._id || index} className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
                       <div className="bg-gray-200 dark:bg-zinc-800 rounded-2xl px-4 py-2 opacity-60 italic text-xs text-gray-500">
                         This message was deleted
                       </div>
@@ -1696,7 +2045,7 @@ export default function Home() {
                   const myVoteIdx = poll.options.findIndex((o: any) => o.votes?.includes(session?.user?.id));
 
                   return (
-                    <div key={message._id || index} className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
+                    <div ref={(el) => { messageRefs.current[message._id] = el; }} key={message._id || index} className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
                       <div className={`max-w-[320px] w-full rounded-2xl overflow-hidden shadow-sm ${
                         isMe ? "bg-blue-600 text-white" : "bg-white dark:bg-zinc-800 text-gray-900 dark:text-white"
                       }`}>
@@ -1780,17 +2129,26 @@ export default function Home() {
                 const hasReactions = Object.keys(reactionGroups).length > 0;
 
                 return (
-                  <div key={message._id || index} className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
+                  <div ref={(el) => { messageRefs.current[message._id] = el; }} key={message._id || index} className={`flex ${isMe ? "justify-end" : "justify-start"}`}>
                     <div className="relative group max-w-[70%] md:max-w-[60%]">
-                      {/* Reaction trigger button — visible on hover (desktop) */}
+                      {/* Reaction and Actions trigger buttons — visible on hover (desktop) */}
                       {message._id && (
-                        <button
-                          onClick={() => setActiveReactionMsgId(activeReactionMsgId === message._id ? null : message._id)}
-                          className={`absolute ${isMe ? "-left-8" : "-right-8"} top-1 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded-full hover:bg-gray-200 dark:hover:bg-zinc-700 z-10 cursor-pointer`}
-                          title="React"
-                        >
-                          <SmilePlus className="w-4 h-4 text-gray-400 dark:text-zinc-500" />
-                        </button>
+                        <div className={`absolute ${isMe ? "-left-16" : "-right-16"} top-1 opacity-0 group-hover:opacity-100 transition-opacity flex items-center gap-1 z-10`}>
+                          <button
+                            onClick={() => setActiveReactionMsgId(activeReactionMsgId === message._id ? null : message._id)}
+                            className="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-zinc-700 cursor-pointer"
+                            title="React"
+                          >
+                            <SmilePlus className="w-4 h-4 text-gray-400 dark:text-zinc-500" />
+                          </button>
+                          <button
+                            onClick={() => setActiveMessageActionId(activeMessageActionId === message._id ? null : message._id)}
+                            className="p-1 rounded-full hover:bg-gray-200 dark:hover:bg-zinc-700 cursor-pointer"
+                            title="Actions"
+                          >
+                            <ChevronRight className="w-4 h-4 text-gray-400 dark:text-zinc-500 rotate-90" />
+                          </button>
+                        </div>
                       )}
 
                       {/* Emoji picker popup */}
@@ -1808,6 +2166,27 @@ export default function Home() {
                         </div>
                       )}
 
+                      {/* Message Actions popup */}
+                      {activeMessageActionId === message._id && (
+                        <MessageActions
+                          message={message}
+                          isMe={isMe}
+                          onReply={(msg) => setReplyingTo(msg)}
+                          onEdit={(msg) => {
+                            setEditingMessage(msg);
+                            setNewMessage(msg.content || "");
+                          }}
+                          onDelete={handleDeleteMessage}
+                          onPin={handlePinMessage}
+                          onUnpin={handleUnpinMessage}
+                          onStar={handleStarMessage}
+                          onUnstar={handleUnstarMessage}
+                          isPinned={selectedChat?.pinnedMessages?.includes(message._id) || false}
+                          isStarred={starredMessageIds.includes(message._id)}
+                          onClose={() => setActiveMessageActionId(null)}
+                        />
+                      )}
+
                       <div className={`w-full rounded-2xl overflow-hidden ${
                         isMe
                           ? "bg-blue-600 text-white rounded-br-sm"
@@ -1818,6 +2197,21 @@ export default function Home() {
                         {selectedChat.isGroup && !isMe && (
                           <div className="px-4 pt-2 pb-0.5 text-[10px] font-bold text-blue-600 dark:text-blue-400 leading-none">
                             {message.sender?.name || "Group Member"}
+                          </div>
+                        )}
+
+                        {/* Reply quote preview */}
+                        {message.replyTo && (
+                          <div className="px-4 pt-2 pb-0.5">
+                            <ReplyPreview
+                              replyMessage={message.replyTo}
+                              currentUserId={session?.user?.id}
+                              isInputStrip={false}
+                              onClick={() => {
+                                const targetId = typeof message.replyTo === "object" ? message.replyTo._id : message.replyTo;
+                                handleScrollToMessage(targetId);
+                              }}
+                            />
                           </div>
                         )}
 
@@ -1869,11 +2263,13 @@ export default function Home() {
                           </div>
                         )}
 
-                        {/* Voice */}
+                        {/* Custom Voice Player */}
                         {message.type === "voice" && message.fileUrl && !isExpired && (
-                          <div className="px-4 py-3">
-                            <audio controls src={message.fileUrl} className="h-9 w-[220px] max-w-full" />
-                          </div>
+                          <VoicePlayer
+                            src={message.fileUrl}
+                            duration={message.voiceDuration}
+                            isMe={isMe}
+                          />
                         )}
 
                         {/* Expired media placeholder */}
@@ -1900,6 +2296,12 @@ export default function Home() {
                             )}
                           </div>
                           <div className="flex items-center gap-1 flex-shrink-0">
+                            {starredMessageIds.includes(message._id) && (
+                              <Star className="w-3 h-3 text-yellow-500 fill-yellow-500 mr-0.5" />
+                            )}
+                            {selectedChat.pinnedMessages?.includes(message._id) && (
+                              <Pin className="w-3 h-3 text-orange-500 mr-0.5 rotate-45" />
+                            )}
                             <span>{format(new Date(message.createdAt || Date.now()), "HH:mm")}</span>
                             {message.isEdited && <span className="italic">edited</span>}
                             {isMe && (() => {
@@ -2076,87 +2478,101 @@ export default function Home() {
                   </div>
                 </div>
               )}
+              {/* Reply preview banner */}
+              {replyingTo && (
+                <ReplyPreview
+                  replyMessage={replyingTo}
+                  currentUserId={session?.user?.id}
+                  isInputStrip={true}
+                  onCancel={() => setReplyingTo(null)}
+                />
+              )}
 
-              {/* Hidden file input */}
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*,video/*,audio/*,.pdf,.doc,.docx,.txt,.zip,.rar"
-                className="hidden"
-                onChange={handleFileUpload}
-              />
-
-              {/* Attach menu */}
-              <div className="relative">
-              {showAttachMenu && (
-                <div className="absolute bottom-14 left-0 bg-white dark:bg-zinc-900 rounded-2xl shadow-xl border border-gray-200 dark:border-zinc-700 py-2 z-10 min-w-[160px]">
+              {/* Editing Banner */}
+              {editingMessage && (
+                <div className="flex items-center justify-between px-3 py-2 mb-2 bg-amber-50 dark:bg-amber-950/20 rounded-xl border border-amber-200 dark:border-amber-900/50 animate-in slide-in-from-bottom duration-150">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-[10px] font-bold text-amber-600 dark:text-amber-400">
+                      Editing message
+                    </p>
+                    <p className="text-xs text-gray-500 dark:text-zinc-400 truncate">{editingMessage.content}</p>
+                  </div>
                   <button
-                    onClick={() => { setShowAttachMenu(false); fileInputRef.current?.click(); }}
-                    className="w-full flex items-center gap-3 px-4 py-3 text-sm hover:bg-gray-50 dark:hover:bg-zinc-800 text-gray-700 dark:text-zinc-200"
+                    onClick={() => {
+                      setEditingMessage(null);
+                      setNewMessage("");
+                    }}
+                    className="p-1 rounded-full hover:bg-amber-100 dark:hover:bg-amber-900/30 text-amber-500 transition-colors flex-shrink-0"
                   >
-                    <Paperclip className="w-4 h-4 text-blue-500" /> Attach File
-                  </button>
-                  <button
-                    onClick={() => { setShowAttachMenu(false); setShowPollForm(true); }}
-                    className="w-full flex items-center gap-3 px-4 py-3 text-sm hover:bg-gray-50 dark:hover:bg-zinc-800 text-gray-700 dark:text-zinc-200"
-                  >
-                    <BarChart2 className="w-4 h-4 text-purple-500" /> Create Poll
+                    <X className="w-4 h-4" />
                   </button>
                 </div>
               )}
-              <form onSubmit={handleSendMessage} className="flex items-center gap-1.5 md:gap-2 bg-white dark:bg-zinc-950 p-1.5 md:p-2 rounded-full shadow-sm">
-                {/* Attach / Poll menu toggle */}
-                <button
-                  type="button"
-                  disabled={isUploading || isRecording}
-                  onClick={() => setShowAttachMenu(!showAttachMenu)}
-                  className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors disabled:opacity-40 flex-shrink-0 ${
-                    showAttachMenu ? "bg-blue-600 text-white" : "text-gray-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-zinc-800"
-                  }`}
-                  title="Attach / Poll"
-                >
-                  {isUploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Plus className="w-5 h-5" />}
-                </button>
 
-                <input
-                  type="text"
-                  value={newMessage}
-                  onChange={handleTyping}
-                  disabled={isRecording}
-                  placeholder={isRecording ? "Recording... release to send" : "Type a message..."}
-                  className="flex-1 bg-transparent border-none focus:ring-0 text-sm px-2 dark:text-white outline-none disabled:opacity-50"
-                />
+              {/* Attach menu and Input form / Block banner */}
+              {selectedChat.otherUser?._id && blockedUsers.includes(selectedChat.otherUser._id) ? (
+                <div className="bg-red-50 dark:bg-red-950/20 border border-red-200 dark:border-red-900/50 text-red-700 dark:text-red-300 text-xs rounded-xl p-3 text-center">
+                  You have blocked this contact. Unblock them to send messages.
+                </div>
+              ) : (
+                <div className="relative">
+                  {showAttachMenu && (
+                    <div className="absolute bottom-14 left-0 bg-white dark:bg-zinc-900 rounded-2xl shadow-xl border border-gray-200 dark:border-zinc-700 py-2 z-10 min-w-[160px]">
+                      <button
+                        onClick={() => { setShowAttachMenu(false); fileInputRef.current?.click(); }}
+                        className="w-full flex items-center gap-3 px-4 py-3 text-sm hover:bg-gray-50 dark:hover:bg-zinc-800 text-gray-700 dark:text-zinc-200"
+                      >
+                        <Paperclip className="w-4 h-4 text-blue-500" /> Attach File
+                      </button>
+                      <button
+                        onClick={() => { setShowAttachMenu(false); setShowPollForm(true); }}
+                        className="w-full flex items-center gap-3 px-4 py-3 text-sm hover:bg-gray-50 dark:hover:bg-zinc-800 text-gray-700 dark:text-zinc-200"
+                      >
+                        <BarChart2 className="w-4 h-4 text-purple-500" /> Create Poll
+                      </button>
+                    </div>
+                  )}
+                  <form onSubmit={handleSendMessage} className="flex items-center gap-1.5 md:gap-2 bg-white dark:bg-zinc-950 p-1.5 md:p-2 rounded-full shadow-sm">
+                    {/* Attach / Poll menu toggle */}
+                    <button
+                      type="button"
+                      disabled={isUploading}
+                      onClick={() => setShowAttachMenu(!showAttachMenu)}
+                      className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors disabled:opacity-40 flex-shrink-0 ${
+                        showAttachMenu ? "bg-blue-600 text-white" : "text-gray-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-zinc-800"
+                      }`}
+                      title="Attach / Poll"
+                    >
+                      {isUploading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Plus className="w-5 h-5" />}
+                    </button>
 
-                {/* Voice record button */}
-                <button
-                  type="button"
-                  disabled={isUploading}
-                  onMouseDown={startRecording}
-                  onMouseUp={stopRecording}
-                  onTouchStart={startRecording}
-                  onTouchEnd={stopRecording}
-                  className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors flex-shrink-0 ${
-                    isRecording
-                      ? "bg-red-500 text-white animate-pulse"
-                      : "text-gray-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-zinc-800"
-                  } disabled:opacity-40`}
-                  title="Hold to record voice message"
-                >
-                  {isRecording ? <StopCircle className="w-5 h-5" /> : <Mic className="w-5 h-5" />}
-                </button>
+                    <input
+                      type="text"
+                      value={newMessage}
+                      onChange={handleTyping}
+                      placeholder="Type a message..."
+                      className="flex-1 bg-transparent border-none focus:ring-0 text-sm px-2 dark:text-white outline-none"
+                    />
 
-                {/* Send text */}
-                <button
-                  type="submit"
-                  disabled={!newMessage.trim() || isRecording || isUploading}
-                  className="w-9 h-9 flex items-center justify-center rounded-full bg-blue-600 text-white hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
-                >
-                  <Send className="w-4 h-4 ml-0.5" />
-                </button>
-              </form>
-              </div>
+                    {/* Custom Voice Recorder */}
+                    <VoiceRecorder
+                      onSend={handleVoiceSend}
+                      disabled={isUploading}
+                    />
+
+                    {/* Send text */}
+                    <button
+                      type="submit"
+                      disabled={!newMessage.trim() || isUploading}
+                      className="w-9 h-9 flex items-center justify-center rounded-full bg-blue-600 text-white hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
+                    >
+                      <Send className="w-4 h-4 ml-0.5" />
+                    </button>
+                  </form>
+                </div>
+              )}
             </div>
-          </>
+          </Fragment>
         ) : (
           /* Welcome screen — only shows on md+ since mobile always shows sidebar */
           <div className="hidden md:flex flex-1 flex-col items-center justify-center text-center p-8">
@@ -2279,6 +2695,50 @@ export default function Home() {
           </div>
         </div>
       )}
+      {/* ── Pinned Messages Panel ── */}
+      <PinnedMessages
+        chatId={selectedChat?._id || selectedChat?.otherUser?._id}
+        isOpen={showPinnedPanel}
+        onClose={() => setShowPinnedPanel(false)}
+        onScrollToMessage={handleScrollToMessage}
+        onUnpin={handleUnpinMessage}
+        pinnedCount={selectedChat?.pinnedMessages?.length || 0}
+      />
+
+      {/* ── Starred Messages Panel ── */}
+      <StarredMessages
+        isOpen={showStarredPanel}
+        onClose={() => setShowStarredPanel(false)}
+        onNavigateToChat={(chatId, messageId) => {
+          const chat = chats.find((c) => c._id === chatId);
+          if (chat) {
+            setSelectedChat(chat);
+            setMobileView("chat");
+            setTimeout(() => {
+              handleScrollToMessage(messageId);
+            }, 600);
+          }
+        }}
+      />
+
+      {/* ── Settings Panel ── */}
+      <SettingsPanel
+        isOpen={showSettingsPanel}
+        onClose={() => {
+          setShowSettingsPanel(false);
+          fetch("/api/users/block")
+            .then((res) => (res.ok ? res.json() : []))
+            .then((data) => {
+              if (Array.isArray(data)) setBlockedUsers(data.map((u: any) => u._id));
+            });
+          fetch("/api/users/settings")
+            .then((res) => (res.ok ? res.json() : null))
+            .then((data) => {
+              if (data?.settings) setUserSettings(data.settings);
+            });
+        }}
+        session={session}
+      />
     </div>
   );
 }
