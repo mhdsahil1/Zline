@@ -2,6 +2,7 @@ import { NextResponse } from "next/dist/server/web/spec-extension/response";
 import { connectDB } from "@/lib/db";
 import { Message } from "@/lib/models/Message";
 import { Chat } from "@/lib/models/Chat";
+import { User } from "@/lib/models/User";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 import mongoose from "mongoose";
@@ -149,6 +150,24 @@ export async function POST(req: Request) {
       }
     }
 
+    // Enforce Block System for 1-to-1 chats
+    if (!chat.isGroup) {
+      const otherUserId = chat.users.find((u: any) => u.toString() !== session.user.id);
+      if (otherUserId) {
+        const [sender, receiver] = await Promise.all([
+          User.findById(session.user.id).select("blockedUsers"),
+          User.findById(otherUserId).select("blockedUsers")
+        ]);
+
+        if (sender?.blockedUsers.some(id => id.toString() === otherUserId.toString())) {
+          return NextResponse.json({ message: "You have blocked this user." }, { status: 403 });
+        }
+        if (receiver?.blockedUsers.some(id => id.toString() === session.user.id)) {
+          return NextResponse.json({ message: "You have been blocked by this user." }, { status: 403 });
+        }
+      }
+    }
+
     // Enforce 100MB per-chat media cap
     if (type !== "text" && fileSize) {
       const mediaMessages = await Message.find({
@@ -245,7 +264,25 @@ export async function PATCH(req: Request) {
       return NextResponse.json({ message: "Missing required fields" }, { status: 400 });
     }
 
+    if (!["sent", "delivered", "seen"].includes(status)) {
+      return NextResponse.json({ message: "Invalid status" }, { status: 400 });
+    }
+
     await connectDB();
+
+    const message = await Message.findById(messageId);
+    if (!message) {
+      return NextResponse.json({ message: "Message not found" }, { status: 404 });
+    }
+
+    const chat = await Chat.findById(message.chat);
+    if (!chat || !chat.users.some((u: any) => u.toString() === session.user.id)) {
+      return NextResponse.json({ message: "Access denied" }, { status: 403 });
+    }
+
+    if (message.sender.toString() === session.user.id) {
+      return NextResponse.json({ message: "Cannot update status of own message" }, { status: 403 });
+    }
 
     const update: any = { status };
 

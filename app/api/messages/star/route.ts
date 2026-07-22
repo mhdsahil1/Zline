@@ -2,6 +2,7 @@ import { NextResponse } from "next/dist/server/web/spec-extension/response";
 import { connectDB } from "@/lib/db";
 import { StarredMessage } from "@/lib/models/StarredMessage";
 import { Message } from "@/lib/models/Message";
+import { Chat } from "@/lib/models/Chat";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 
@@ -58,6 +59,11 @@ export async function POST(req: Request) {
     const message = await Message.findById(messageId);
     if (!message) {
       return NextResponse.json({ message: "Message not found" }, { status: 404 });
+    }
+
+    const chat = await Chat.findById(message.chat);
+    if (!chat || !chat.users.some((u: any) => u.toString() === session.user.id)) {
+      return NextResponse.json({ message: "Access denied" }, { status: 403 });
     }
 
     // Create starred message (compound unique index prevents duplicates)

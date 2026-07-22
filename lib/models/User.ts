@@ -13,6 +13,8 @@ export interface IUser extends Document {
   email: string;
   password?: string;
   image?: string;
+  emailVerified: boolean;
+  authProviders: string[];
   isOnline: boolean;
   lastSeen: Date;
   blockedUsers: mongoose.Types.ObjectId[];
@@ -38,6 +40,8 @@ const userSchema = new Schema<IUser>(
     email: { type: String, required: true, unique: true },
     password: { type: String }, // optional for OAuth users
     image: { type: String },
+    emailVerified: { type: Boolean, default: false },
+    authProviders: { type: [String], default: ["credentials"] },
     isOnline: { type: Boolean, default: false },
     lastSeen: { type: Date, default: Date.now },
     blockedUsers: [{ type: Schema.Types.ObjectId, ref: "User" }],

@@ -22,7 +22,8 @@ export async function GET(req: Request) {
 
     await connectDB();
     const userId = session.user.id;
-    const regex = new RegExp(query, "i");
+    const safeQuery = query.substring(0, 100).replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&");
+    const regex = new RegExp(safeQuery, "i");
 
     // 1. Search Users
     const users = await User.find({

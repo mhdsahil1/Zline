@@ -1,8 +1,8 @@
 import mongoose from "mongoose";
-import dns from "dns";
+import dns from "node:dns";
 
-// 🔥 FORCE NODE.JS TO BYPASS WINDOWS DNS AND USE GOOGLE'S DNS 🔥
-dns.setServers(["8.8.8.8", "8.8.4.4"]);
+// 🔥 FORCE NODE.JS TO BYPASS WINDOWS DNS AND USE CUSTOM DNS 🔥
+dns.setServers(["8.8.8.8", "1.1.1.1"]);
 
 const MONGODB_URI = process.env.MONGO_URI!;
 

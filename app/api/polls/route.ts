@@ -39,11 +39,12 @@ export async function POST(req: Request) {
 
     // Find or create chat
     let chat = await Chat.findOne({
+      isGroup: false,
       users: { $all: [session.user.id, receiverId] },
     });
 
     if (!chat) {
-      chat = await Chat.create({ users: [session.user.id, receiverId] });
+      chat = await Chat.create({ users: [session.user.id, receiverId], isGroup: false });
     }
 
     const newMessage = await Message.create({
@@ -87,6 +88,11 @@ export async function PATCH(req: Request) {
     const message = await Message.findById(messageId);
     if (!message || message.type !== "poll" || !message.poll) {
       return NextResponse.json({ message: "Poll not found" }, { status: 404 });
+    }
+
+    const chat = await Chat.findById(message.chat);
+    if (!chat || !chat.users.some((u: any) => u.toString() === session.user.id)) {
+      return NextResponse.json({ message: "Access denied" }, { status: 403 });
     }
 
     if (action === "end") {

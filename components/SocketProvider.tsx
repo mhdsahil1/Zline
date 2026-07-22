@@ -32,11 +32,23 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
       const socketUrl = process.env.NEXT_PUBLIC_SOCKET_URL || "http://localhost:3001";
       console.log("Initializing socket connection to:", socketUrl);
 
+      let token = "";
+      try {
+        const res = await fetch("/api/auth/socket-token");
+        if (res.ok) {
+          const data = await res.json();
+          token = data.token;
+        }
+      } catch (e) {
+        console.error("Failed to fetch socket token:", e);
+      }
+
       socketInstance = io(socketUrl, {
         transports: ["websocket", "polling"],
         reconnection: true,
         reconnectionAttempts: Infinity,
         reconnectionDelay: 1000,
+        auth: { token },
       });
 
       socketInstance.on("connect", () => {

@@ -20,11 +20,12 @@ export async function GET(req: Request) {
 
     // If search query exists, filter by name or email
     if (search && search.trim()) {
+      const safeSearch = search.substring(0, 100).replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&");
       query = {
         ...query,
         $or: [
-          { name: { $regex: search, $options: "i" } },
-          { email: { $regex: search, $options: "i" } },
+          { name: { $regex: safeSearch, $options: "i" } },
+          { email: { $regex: safeSearch, $options: "i" } },
         ],
       };
     }

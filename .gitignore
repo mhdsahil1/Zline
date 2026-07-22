@@ -46,3 +46,6 @@ CLAUDE.md
 test-db.js
 
 socket-server/
+
+patch.py
+
