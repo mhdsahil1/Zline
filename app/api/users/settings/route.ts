@@ -14,7 +14,7 @@ export async function GET() {
 
     await connectDB();
 
-    const user = await User.findById(session.user.id).select("settings name email image");
+    const user = await User.findById(session.user.id).select("settings name email image authProviders");
     if (!user) {
       return NextResponse.json({ message: "User not found" }, { status: 404 });
     }
@@ -24,6 +24,7 @@ export async function GET() {
       email: user.email,
       image: user.image,
       settings: user.settings,
+      authProviders: user.authProviders,
     }, { status: 200 });
   } catch (error) {
     console.error("Fetch settings error:", error);

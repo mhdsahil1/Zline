@@ -50,6 +50,10 @@ export const authOptions: NextAuthOptions = {
           throw new Error("Invalid credentials");
         }
 
+        if (user.deleted) {
+          throw new Error("This account has been deleted.");
+        }
+
         const isCorrectPassword = await bcrypt.compare(
           credentials.password,
           user.password
@@ -190,6 +194,11 @@ export const authOptions: NextAuthOptions = {
         const existingUser = await User.findOne({ email });
 
         if (existingUser) {
+          if (existingUser.deleted) {
+            // Block login to deleted accounts
+            return false;
+          }
+
           if (existingUser.authProviders.includes("google")) {
             // Already linked — allow sign-in
             return true;
@@ -248,6 +257,11 @@ export const authOptions: NextAuthOptions = {
         );
         const dbUser = await User.findOne({ email });
         if (dbUser) {
+          if (dbUser.deleted) {
+            // Invalidate token for deleted users — forces logout on all devices
+            token.id = undefined;
+            return token;
+          }
           token.id = dbUser._id.toString();
           token.name = dbUser.name;
           token.picture = dbUser.image;

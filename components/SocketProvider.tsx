@@ -2,7 +2,7 @@
 
 import React, { createContext, useContext, useEffect, useState } from "react";
 import { io, Socket } from "socket.io-client";
-import { useSession } from "next-auth/react";
+import { useSession, signOut } from "next-auth/react";
 
 interface SocketContextType {
   socket: Socket | null;
@@ -66,6 +66,32 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
 
       socketInstance.on("connect_error", (error) => {
         console.error("Socket connection error:", error.message);
+      });
+
+      // ─── Account Deletion: Force Logout ───────────────────────────────
+      // When the account is deleted (from this or another device), the socket
+      // server broadcasts force_logout to all sockets in the user's room.
+      // This ensures immediate multi-device logout.
+      socketInstance.on("force_logout", () => {
+        console.warn("Force logout received — account has been deleted.");
+        // Clean up local E2EE keys
+        if (session?.user?.id) {
+          try {
+            localStorage.removeItem(`zline_e2e_public_key_${session.user.id}`);
+            localStorage.removeItem(`zline_e2e_private_key_${session.user.id}`);
+          } catch {
+            // localStorage may not be available
+          }
+        }
+        signOut({ callbackUrl: "/login" });
+      });
+
+      // ─── Account Deletion: Contact Notification ───────────────────────
+      // When another user's account is deleted, refresh to update the chat
+      // list with the new "Deleted User #XXXX" name.
+      socketInstance.on("user_deleted", () => {
+        // Reload chat list to reflect deleted user's anonymized name
+        window.dispatchEvent(new CustomEvent("zline:refresh_chats"));
       });
 
       setSocket(socketInstance);

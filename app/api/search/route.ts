@@ -25,9 +25,10 @@ export async function GET(req: Request) {
     const safeQuery = query.substring(0, 100).replace(/[-[\]{}()*+?.,\\^$|#\s]/g, "\\$&");
     const regex = new RegExp(safeQuery, "i");
 
-    // 1. Search Users
+    // 1. Search Users (exclude deleted accounts)
     const users = await User.find({
       _id: { $ne: userId },
+      deleted: { $ne: true },
       $or: [{ name: regex }, { email: regex }],
     })
       .select("-password")

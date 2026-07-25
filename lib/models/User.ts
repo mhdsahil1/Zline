@@ -19,6 +19,8 @@ export interface IUser extends Document {
   lastSeen: Date;
   blockedUsers: mongoose.Types.ObjectId[];
   settings: IUserSettings;
+  deleted: boolean;
+  deletedAt?: Date;
   createdAt: Date;
   updatedAt: Date;
 }
@@ -46,6 +48,8 @@ const userSchema = new Schema<IUser>(
     lastSeen: { type: Date, default: Date.now },
     blockedUsers: [{ type: Schema.Types.ObjectId, ref: "User" }],
     settings: { type: userSettingsSchema, default: () => ({}) },
+    deleted: { type: Boolean, default: false },
+    deletedAt: { type: Date },
   },
   { timestamps: true }
 );

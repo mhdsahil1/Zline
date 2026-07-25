@@ -16,7 +16,7 @@ export async function GET(req: Request) {
 
     await connectDB();
 
-    let query: any = { _id: { $ne: session.user.id } };
+    let query: any = { _id: { $ne: session.user.id }, deleted: { $ne: true } };
 
     // If search query exists, filter by name or email
     if (search && search.trim()) {
