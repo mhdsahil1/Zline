@@ -2,24 +2,29 @@
 
 # 💬 Zline
 
-### Private by Design. Secure by Default.
+### **Private by Design. Secure by Default.**
 
-A modern end-to-end encrypted messaging platform built with Next.js, WebRTC, Socket.IO and MongoDB.
+*A modern real-time messaging platform built with Next.js, WebRTC, Socket.IO and MongoDB.*
 
-[![Version](https://img.shields.io/badge/Version-v1.0-blue?style=for-the-badge)]()
+<br>
+
+[![Live Demo](https://img.shields.io/badge/🚀_Live_Demo-Visit-2563EB?style=for-the-badge)](https://zline.vercel.app)
+[![Version](https://img.shields.io/badge/Version-v1.0-success?style=for-the-badge)]()
 [![Status](https://img.shields.io/badge/Status-Stable-success?style=for-the-badge)]()
-[![Production](https://img.shields.io/badge/Production-Live-success?style=for-the-badge)]()
 [![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)]()
 
 <br>
 
-![Next.js](https://img.shields.io/badge/Next.js-black?logo=next.js&style=flat-square)
-![React](https://img.shields.io/badge/React-20232A?logo=react&style=flat-square)
-![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&style=flat-square)
-![TailwindCSS](https://img.shields.io/badge/TailwindCSS-38B2AC?logo=tailwind-css&style=flat-square)
-![MongoDB](https://img.shields.io/badge/MongoDB-47A248?logo=mongodb&style=flat-square)
-![Socket.IO](https://img.shields.io/badge/Socket.IO-black?logo=socket.io&style=flat-square)
-![WebRTC](https://img.shields.io/badge/WebRTC-333333?style=flat-square)
+![GitHub stars](https://img.shields.io/github/stars/mhdsahil1zline?style=for-the-badge)
+![GitHub forks](https://img.shields.io/github/forks/mhdsahil1/zline?style=for-the-badge)
+![GitHub issues](https://img.shields.io/github/issues/mhdsahil1/zline?style=for-the-badge)
+![GitHub last commit](https://img.shields.io/github/last-commit/mhdsahil1/zline?style=for-the-badge)
+![GitHub repo size](https://img.shields.io/github/repo-size/mhdsahil1/zline?style=for-the-badge)
+![GitHub top language](https://img.shields.io/github/languages/top/mhdsahil1/zline?style=for-the-badge)
+
+<br>
+
+![](https://komarev.com/ghpvc/?username=mhdsahil1&repo=zline&style=for-the-badge)
 
 </div>
 
@@ -27,128 +32,165 @@ A modern end-to-end encrypted messaging platform built with Next.js, WebRTC, Soc
 
 # ✨ Overview
 
-Zline is a secure real-time communication platform focused on privacy, performance and modern architecture.
+Zline is a production-ready end-to-end encrypted messaging platform focused on privacy, security and real-time communication.
 
-Instead of simply recreating an existing messenger, the goal was to explore how production messaging systems are engineered, from authentication and encryption to WebRTC signaling, scalable sockets and secure backend design.
+Built to explore modern distributed application development, Zline combines secure authentication, encrypted messaging, WebRTC calling, scalable socket communication and production deployment into one complete application.
+
+Rather than cloning an existing messenger, the goal was to understand how real communication platforms are engineered.
 
 ---
 
-# 🚀 Highlights
+# 📸 Preview
 
-| Feature | Status |
-|----------|--------|
-| 🔐 Authentication | ✅ |
-| 🌐 Google OAuth | ✅ |
-| 💬 Real-time Chat | ✅ |
-| 🔒 End-to-End Encryption | ✅ |
-| 🎤 Voice Calls | ✅ |
-| 📹 Video Calls | ✅ |
-| 👥 Group Calls | ✅ |
-| 📎 File Sharing | ✅ |
-| 🎙 Voice Messages | ✅ |
-| 📌 Pin Messages | ✅ |
-| ⭐ Starred Messages | ✅ |
-| 🔍 Search | ✅ |
-| 🚫 Blocking | ✅ |
-| 🔔 Push Notifications | ✅ |
-| 🛡 Security Hardening | ✅ |
+<p align="center">
+
+<img src="./docs/login.png" width="31%">
+<img src="./docs/chat.png" width="31%">
+<img src="./docs/call.png" width="31%">
+
+</p>
+
+---
+
+# 🎥 Demo
+
+<p align="center">
+
+<img src="./docs/demo.gif">
+
+</p>
+
+---
+
+# 🚀 Features
+
+| Authentication | Communication | Security |
+|---------------|--------------|----------|
+| ✅ Email Login | ✅ Real-time Chat | ✅ End-to-End Encryption |
+| ✅ Google OAuth | ✅ Voice Calls | ✅ JWT Authentication |
+| ✅ Session Management | ✅ Video Calls | ✅ HMAC Socket Auth |
+| ✅ Protected Routes | ✅ Group Calls | ✅ NoSQL Protection |
+| ✅ Account Recovery | ✅ Voice Messages | ✅ IDOR Protection |
+| ✅ Delete Account | ✅ Search Messages | ✅ Rate Limiting |
+| | ✅ Pin Messages | ✅ Secure Headers |
+| | ✅ Star Messages | ✅ CORS Protection |
+| | ✅ Push Notifications | ✅ Authorization Checks |
+
+---
+
+# 🏗 Architecture
+
+<p align="center">
+
+<img src="./docs/architecture.png" width="900">
+
+</p>
+
+```
+Browser
+     │
+     ▼
+ Next.js Application
+     │
+ ┌───────────────┐
+ │               │
+Auth.js      Socket.IO
+ │               │
+ │           WebRTC
+ └──────┬────────┘
+        ▼
+ MongoDB Atlas
+        │
+        ▼
+ Render Socket Server
+```
+
+---
+
+# 💻 Tech Stack
+
+## Frontend
+
+![Next.js](https://img.shields.io/badge/Next.js-black?style=for-the-badge&logo=next.js)
+![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript)
+![Tailwind CSS](https://img.shields.io/badge/TailwindCSS-38BDF8?style=for-the-badge&logo=tailwindcss)
+
+---
+
+## Backend
+
+![Node.js](https://img.shields.io/badge/Node.js-339933?style=for-the-badge&logo=node.js)
+![MongoDB](https://img.shields.io/badge/MongoDB-4EA94B?style=for-the-badge&logo=mongodb)
+![Socket.IO](https://img.shields.io/badge/Socket.IO-black?style=for-the-badge&logo=socket.io)
+![Auth.js](https://img.shields.io/badge/Auth.js-black?style=for-the-badge)
+![JWT](https://img.shields.io/badge/JWT-black?style=for-the-badge&logo=jsonwebtokens)
+
+---
+
+## Deployment
+
+![Vercel](https://img.shields.io/badge/Vercel-black?style=for-the-badge&logo=vercel)
+![Render](https://img.shields.io/badge/Render-46E3B7?style=for-the-badge&logo=render)
 
 ---
 
 # 🛡 Security
 
-> Security was treated as an architectural requirement rather than a feature.
+> Security was treated as infrastructure, not as a feature.
 
-- ✅ End-to-End Encryption
-- ✅ JWT Authentication
-- ✅ Google OAuth
-- ✅ HMAC Socket Authentication
-- ✅ Rate Limiting
-- ✅ NoSQL Injection Protection
-- ✅ IDOR Prevention
-- ✅ Authorization Validation
-- ✅ Secure Headers
-- ✅ CORS Protection
-- ✅ Input Sanitization
-
----
-
-# 🏗 Tech Stack
-
-### Frontend
-
-![Next.js](https://img.shields.io/badge/Next.js-black?logo=next.js&style=for-the-badge)
-![React](https://img.shields.io/badge/React-20232A?logo=react&style=for-the-badge)
-![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?logo=typescript&style=for-the-badge)
-![TailwindCSS](https://img.shields.io/badge/TailwindCSS-38B2AC?logo=tailwind-css&style=for-the-badge)
-
-### Backend
-
-![Node.js](https://img.shields.io/badge/Node.js-339933?logo=node.js&style=for-the-badge)
-![MongoDB](https://img.shields.io/badge/MongoDB-47A248?logo=mongodb&style=for-the-badge)
-![Socket.IO](https://img.shields.io/badge/Socket.IO-black?logo=socket.io&style=for-the-badge)
-![Auth.js](https://img.shields.io/badge/Auth.js-black?style=for-the-badge)
-
-### Deployment
-
-![Vercel](https://img.shields.io/badge/Vercel-black?logo=vercel&style=for-the-badge)
-![Render](https://img.shields.io/badge/Render-46E3B7?logo=render&style=for-the-badge)
+- 🔐 End-to-End Encryption
+- 🔐 JWT Authentication
+- 🔐 Google OAuth
+- 🔐 HMAC Socket Authentication
+- 🛡 Authorization Validation
+- 🛡 NoSQL Injection Protection
+- 🛡 IDOR Protection
+- 🛡 Rate Limiting
+- 🛡 Secure Headers
+- 🛡 Input Validation
+- 🛡 CORS Protection
 
 ---
 
-# 📊 Architecture
+# 📂 Project Structure
 
-```text
-Client
-   │
-   ▼
-Next.js Application
-   │
-   ├── Auth.js
-   ├── API Routes
-   ├── Socket.IO
-   ├── WebRTC
-   │
-   ▼
-MongoDB Atlas
+```
+app/
+components/
+hooks/
+lib/
+models/
+public/
+socket-server/
+types/
+utils/
 ```
 
 ---
 
-# 📷 Screenshots
+# ⚙ Environment Variables
 
-> Coming soon...
+```env
+MONGODB_URI=
 
-| Login | Chat | Calls |
-|-------|------|------|
-| Image | Image | Image |
+AUTH_SECRET=
 
----
+AUTH_GOOGLE_ID=
 
-# 🗺 Roadmap
+AUTH_GOOGLE_SECRET=
 
-- [x] Authentication
-- [x] Google OAuth
-- [x] End-to-End Encryption
-- [x] Real-time Messaging
-- [x] Voice & Video Calls
-- [x] Group Calls
-- [x] Push Notifications
-- [x] Production Deployment
+NEXT_PUBLIC_SOCKET_URL=
 
-### Future
-
-- [ ] Mobile App
-- [ ] Desktop Client
-- [ ] Shared Media
-- [ ] Friend System
+NEXT_PUBLIC_APP_URL=
+```
 
 ---
 
-# ⚡ Quick Start
+# 🚀 Getting Started
 
 ```bash
-git clone https://github.com/yourusername/zline.git
+git clone https://github.com/YOUR_USERNAME/zline.git
 
 cd zline
 
@@ -159,20 +201,81 @@ npm run dev
 
 ---
 
-# 📈 Project Status
+# 📈 Roadmap
 
-> **Version:** v1.0
+## ✅ Version 1.0
 
-Zline has reached its first stable milestone.
+- [x] Authentication
+- [x] Google OAuth
+- [x] Secure Messaging
+- [x] Voice & Video Calls
+- [x] Group Calls
+- [x] Push Notifications
+- [x] Production Deployment
+- [x] Security Hardening
 
-Version 1.0 concludes the original vision of the project. Future releases will focus on refinement rather than expansion.
+## 🔮 Future
+
+- [ ] Desktop Client
+
+- [ ] Mobile App
+
+- [ ] Friend System
+
+- [ ] Shared Media
+
+- [ ] Message Scheduling
+
+---
+
+# 🤝 Contributing
+
+Contributions, ideas and improvements are welcome.
+
+Please open an Issue first before submitting major changes.
+
+---
+
+# 📜 License
+
+This project is licensed under the MIT License.
+
+---
+
+# 🙏 Acknowledgements
+
+Special thanks to the open-source community and the maintainers of:
+
+- Next.js
+- React
+- MongoDB
+- Socket.IO
+- WebRTC
+- Tailwind CSS
+- Auth.js
+- Vercel
+- Render
+
+Without their work, projects like this would be significantly harder to build.
 
 ---
 
 <div align="center">
 
-### Built with ❤️, curiosity, coffee, and an unreasonable number of debugging sessions.
+# 💬 Zline v1.0
 
-**Zline v1.0**
+### *Private by Design. Secure by Default.*
+
+*"Some projects are built to impress.*
+
+*Others are built to teach.*
+
+**Zline was built to do both."*
+
+⭐ If you found this project interesting, consider giving it a star.
+
+---
+
+**Built with curiosity, persistence, and an unreasonable amount of debugging.**
 
 </div>
