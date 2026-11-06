@@ -1,14 +1,25 @@
 @import "tailwindcss";
+@source "../components";
+
+@custom-variant dark (&:where(.dark, .dark *));
 
 :root {
   --background: #ffffff;
   --foreground: #171717;
+  color-scheme: light;
+}
+
+.dark {
+  --background: #121010; /* Deep brand dark charcoal */
+  --foreground: #ededed;
+  color-scheme: dark;
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
-    --background: #1b1818; /* Deep brand charcoal */
+  :root:not(.light) {
+    --background: #121010;
     --foreground: #ededed;
+    color-scheme: dark;
   }
 }
 
@@ -35,7 +46,9 @@
   --color-zinc-500: #7d7070;
   --color-zinc-600: #594f4f;
   --color-zinc-700: #463d3d;
+  --color-zinc-750: #3d3535;
   --color-zinc-800: #342d2d;
+  --color-zinc-850: #2a2424;
   --color-zinc-900: #241f1f;
   --color-zinc-950: #1b1818;
 
@@ -50,15 +63,19 @@
   --font-mono: var(--font-geist-mono);
 }
 
+html {
+  scroll-behavior: smooth;
+}
+
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-inter), system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  /* Clip horizontal overflow safely without creating a nested scroll container */
+  overflow-x: clip;
   /* Prevent iOS text size adjustment on rotation */
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
-  /* Prevent momentum scrolling leaking out of containers */
-  overscroll-behavior: none;
 }
 
 /* Remove tap highlight on mobile */

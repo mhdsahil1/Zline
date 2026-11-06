@@ -56,10 +56,13 @@ export async function POST(req: Request) {
 
     const hashedPassword = await bcrypt.hash(password, 10);
 
+    const image = typeof body.image === "string" ? body.image : undefined;
+
     await User.create({
       name,
       email,
       password: hashedPassword,
+      image,
       authProviders: ["credentials"],
     });
 

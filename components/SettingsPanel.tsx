@@ -4,10 +4,14 @@ import React, { useState, useEffect, useCallback } from "react";
 import {
   Settings, X, Shield, Bell, Palette, UserX, Lock, LogOut, Loader2,
   Eye, EyeOff, Volume2, VolumeX, Monitor, Moon, Sun, ChevronRight,
-  Trash2, AlertTriangle, CheckCircle
+  Trash2, AlertTriangle, CheckCircle, Camera, Sparkles
 } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { useSocket } from "@/components/SocketProvider";
+import UserAvatar from "@/components/UserAvatar";
+import AvatarModal from "@/components/AvatarModal";
+import { useTheme } from "@/components/ThemeProvider";
+import SwitchButton from "@/components/SwitchButton";
 
 interface SettingsPanelProps {
   isOpen: boolean;
@@ -17,11 +21,13 @@ interface SettingsPanelProps {
 
 export default function SettingsPanel({ isOpen, onClose, session }: SettingsPanelProps) {
   const { socket } = useSocket();
+  const { theme: activeTheme, resolvedTheme, setTheme } = useTheme();
   const [activeSection, setActiveSection] = useState<string | null>(null);
   const [settings, setSettings] = useState<any>(null);
   const [blockedUsers, setBlockedUsers] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [showAvatarModal, setShowAvatarModal] = useState(false);
 
   // Delete account state
   const [authProviders, setAuthProviders] = useState<string[]>([]);
@@ -98,6 +104,9 @@ export default function SettingsPanel({ isOpen, onClose, session }: SettingsPane
   }, [settings?.theme]);
 
   const updateSetting = async (field: string, value: any) => {
+    if (field === "theme") {
+      setTheme(value);
+    }
     setSaving(true);
     try {
       const res = await fetch("/api/users/settings", {
@@ -247,10 +256,28 @@ export default function SettingsPanel({ isOpen, onClose, session }: SettingsPane
             ← Back
           </button>
           <h4 className="px-4 py-2 text-xs font-bold text-gray-500 dark:text-zinc-400 uppercase tracking-wider">Appearance</h4>
+          
+          {/* Quick Toggle using Kokonut SwitchButton */}
+          <div className="mx-4 mb-3 p-3 bg-gray-50 dark:bg-zinc-800/60 rounded-2xl border border-gray-200/80 dark:border-zinc-700/80 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-semibold text-gray-900 dark:text-white">Theme Switcher</p>
+              <p className="text-[10px] text-gray-500 dark:text-zinc-400">Click to switch theme with circular reveal</p>
+            </div>
+            <SwitchButton
+              theme={resolvedTheme as "light" | "dark"}
+              onThemeChange={(newTheme) => {
+                setTheme(newTheme);
+                updateSetting("theme", newTheme);
+              }}
+              showLabel={true}
+              size="default"
+            />
+          </div>
+
           <div className="px-4 py-2 grid grid-cols-3 gap-2">
             {themes.map((t) => {
               const Icon = t.icon;
-              const selected = (settings?.theme || "system") === t.value;
+              const selected = (activeTheme || settings?.theme || "system") === t.value;
               return (
                 <button
                   key={t.value}
@@ -292,9 +319,12 @@ export default function SettingsPanel({ isOpen, onClose, session }: SettingsPane
                 className="flex items-center justify-between px-4 py-3 hover:bg-gray-50 dark:hover:bg-zinc-800/50 transition-colors"
               >
                 <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-zinc-800 flex items-center justify-center text-gray-600 dark:text-zinc-400 font-bold text-xs">
-                    {user.name?.charAt(0).toUpperCase()}
-                  </div>
+                  <UserAvatar
+                    image={user.image}
+                    name={user.name}
+                    className="w-8 h-8"
+                    textClassName="text-xs"
+                  />
                   <div>
                     <p className="text-sm font-medium text-gray-900 dark:text-white">{user.name}</p>
                     <p className="text-[10px] text-gray-400 dark:text-zinc-500">{user.email}</p>
@@ -585,14 +615,57 @@ export default function SettingsPanel({ isOpen, onClose, session }: SettingsPane
     return (
       <div className="py-2">
         {/* Profile Section */}
-        <div className="px-4 py-4 flex items-center gap-3 border-b border-gray-100 dark:border-zinc-800">
-          <div className="w-12 h-12 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center text-blue-600 font-bold text-lg">
-            {session?.user?.name?.charAt(0).toUpperCase()}
+        <div className="px-4 py-4 flex items-center justify-between border-b border-gray-100 dark:border-zinc-800">
+          <div className="flex items-center gap-3 min-w-0">
+            <button
+              type="button"
+              onClick={() => setShowAvatarModal(true)}
+              className="relative group cursor-pointer rounded-full outline-none focus-visible:ring-2 focus-visible:ring-blue-600 shrink-0"
+              title="Change avatar"
+            >
+              <UserAvatar
+                image={session?.user?.image}
+                name={session?.user?.name}
+                className="w-12 h-12"
+                textClassName="text-lg"
+              />
+              <div className="absolute inset-0 bg-black/40 rounded-full opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center text-white">
+                <Camera className="w-4 h-4" />
+              </div>
+            </button>
+            <div className="min-w-0">
+              <p className="text-sm font-bold text-gray-900 dark:text-white truncate">{session?.user?.name}</p>
+              <p className="text-xs text-gray-400 dark:text-zinc-500 truncate">{session?.user?.email}</p>
+            </div>
           </div>
-          <div>
-            <p className="text-sm font-bold text-gray-900 dark:text-white">{session?.user?.name}</p>
-            <p className="text-xs text-gray-400 dark:text-zinc-500">{session?.user?.email}</p>
+          <button
+            type="button"
+            onClick={() => setShowAvatarModal(true)}
+            className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-blue-50 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 hover:bg-blue-100 dark:hover:bg-blue-900/50 transition-colors shrink-0"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            <span>Change</span>
+          </button>
+        </div>
+
+        {/* Quick Theme Switcher Item */}
+        <div className="px-4 py-3 flex items-center justify-between border-b border-gray-100 dark:border-zinc-800">
+          <div className="flex items-center gap-3">
+            <Palette className="w-4.5 h-4.5 text-gray-500 dark:text-zinc-400" />
+            <div className="text-left">
+              <p className="text-sm font-medium text-gray-900 dark:text-white">Theme</p>
+              <p className="text-[10px] text-gray-400 dark:text-zinc-500 capitalize">{resolvedTheme} mode</p>
+            </div>
           </div>
+          <SwitchButton
+            theme={resolvedTheme as "light" | "dark"}
+            onThemeChange={(newTheme) => {
+              setTheme(newTheme);
+              updateSetting("theme", newTheme);
+            }}
+            showLabel={true}
+            size="sm"
+          />
         </div>
 
         {/* Menu */}
@@ -666,6 +739,12 @@ export default function SettingsPanel({ isOpen, onClose, session }: SettingsPane
           {renderContent()}
         </div>
       </div>
+
+      <AvatarModal
+        isOpen={showAvatarModal}
+        onClose={() => setShowAvatarModal(false)}
+        initialName={session?.user?.name}
+      />
     </div>
   );
 }

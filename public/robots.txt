@@ -1,0 +1,14 @@
+User-agent: *
+Allow: /
+Allow: /login
+Allow: /register
+Allow: /link
+Allow: /login/otp
+Disallow: /chat
+Disallow: /chat/
+Disallow: /api/
+Disallow: /_next/
+Disallow: /socket-server/
+
+Sitemap: https://zline.vercel.app/sitemap.xml
+Host: https://zline.vercel.app

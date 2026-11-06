@@ -1,0 +1,36 @@
+version: "3.8"
+
+services:
+  # Obscura Rust-based Headless Browser Engine
+  # Exposes Chrome DevTools Protocol (CDP) for dynamic webpage rendering and extraction
+  obscura:
+    image: h4ckf0r0day/obscura:latest
+    container_name: zline-obscura
+    restart: unless-stopped
+    # Security: Bind CDP port strictly to localhost (127.0.0.1) to prevent external network exposure
+    ports:
+      - "127.0.0.1:9222:9222"
+    environment:
+      - OBSCURA_PORT=9222
+      - OBSCURA_HOST=0.0.0.0
+      - RUST_LOG=info
+    # Resource limits to prevent runaway browser allocations
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2048M
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+    # In-memory shared memory to prevent Chromium / DevTools crashes on heavy JS pages
+    shm_size: "1gb"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:9222/json/version || curl -sf http://127.0.0.1:9222/json/version || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    security_opt:
+      - no-new-privileges:true
+

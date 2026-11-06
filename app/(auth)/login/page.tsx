@@ -4,15 +4,18 @@ import { signIn, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import Link from "next/link";
+import { Sun, Moon } from "lucide-react";
 import Logo from "@/components/Logo";
+import { useTheme } from "@/components/ThemeProvider";
 
 export default function LoginPage() {
   const router = useRouter();
   const { status } = useSession();
+  const { resolvedTheme, toggleTheme } = useTheme();
   
   useEffect(() => {
     if (status === "authenticated") {
-      router.push("/");
+      router.push("/chat");
     }
   }, [status, router]);
 
@@ -40,7 +43,7 @@ export default function LoginPage() {
         return;
       }
 
-      router.push("/");
+      router.push("/chat");
       router.refresh();
     } catch (err) {
       setError("Something went wrong. Please try again.");
@@ -52,7 +55,7 @@ export default function LoginPage() {
     setGoogleLoading(true);
     setError("");
     try {
-      await signIn("google", { callbackUrl: "/" });
+      await signIn("google", { callbackUrl: "/chat" });
     } catch (err) {
       setError("Google sign-in failed. Please try again.");
       setGoogleLoading(false);
@@ -60,13 +63,27 @@ export default function LoginPage() {
   };
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-12 sm:px-6 lg:px-8 dark:bg-zinc-950">
-      <div className="w-full max-w-md space-y-8 bg-white p-8 rounded-2xl shadow-xl dark:bg-zinc-900 border border-gray-100 dark:border-zinc-800">
+    <div className="relative flex min-h-screen items-center justify-center bg-gray-50 px-4 py-8 sm:px-6 lg:px-8 dark:bg-zinc-950">
+      {/* Theme Toggle Button */}
+      <button
+        type="button"
+        onClick={toggleTheme}
+        className="absolute top-4 right-4 p-2.5 rounded-xl border border-gray-200 dark:border-zinc-800 text-gray-600 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-zinc-850 transition-colors cursor-pointer"
+        aria-label="Toggle theme"
+      >
+        {resolvedTheme === "dark" ? (
+          <Sun className="w-5 h-5 text-amber-400" />
+        ) : (
+          <Moon className="w-5 h-5 text-gray-700" />
+        )}
+      </button>
+
+      <div className="w-full max-w-md space-y-6 sm:space-y-8 bg-white p-6 sm:p-8 rounded-2xl shadow-xl dark:bg-zinc-900 border border-gray-100 dark:border-zinc-800">
         <div className="flex flex-col items-center justify-center">
-          <Logo className="h-16 w-auto mb-6" />
-          <h2 className="text-center text-3xl font-bold tracking-tight text-gray-900 dark:text-white">
+          <Logo className="h-14 sm:h-16 w-auto mb-4 sm:mb-6" />
+          <h1 className="text-center text-2xl sm:text-3xl font-bold tracking-tight text-gray-900 dark:text-white">
             Sign in to Zline
-          </h2>
+          </h1>
         </div>
 
         {/* Google Sign-In Button */}

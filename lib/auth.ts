@@ -248,7 +248,14 @@ export const authOptions: NextAuthOptions = {
       return true;
     },
 
-    async jwt({ token, user, account, profile }) {
+    async jwt({ token, user, account, profile, trigger, session }) {
+      if (trigger === "update" && session) {
+        if (session.image) token.picture = session.image;
+        if (session.name) token.name = session.name;
+        if (session.user?.image) token.picture = session.user.image;
+        if (session.user?.name) token.name = session.user.name;
+      }
+
       if (account?.provider === "google") {
         // For Google OAuth, look up the MongoDB user by email
         await connectDB();
@@ -269,6 +276,8 @@ export const authOptions: NextAuthOptions = {
       } else if (user) {
         // For credentials and email-otp providers
         token.id = user.id;
+        token.name = user.name;
+        token.picture = user.image;
       }
       return token;
     },
@@ -276,6 +285,8 @@ export const authOptions: NextAuthOptions = {
     async session({ session, token }) {
       if (session.user) {
         session.user.id = token.id as string;
+        session.user.image = (token.picture as string) || session.user.image || null;
+        if (token.name) session.user.name = token.name as string;
       }
       return session;
     },

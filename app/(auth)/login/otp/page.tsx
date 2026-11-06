@@ -22,7 +22,7 @@ export default function OtpLoginPage() {
 
   useEffect(() => {
     if (status === "authenticated") {
-      router.push("/");
+      router.push("/chat");
     }
   }, [status, router]);
 
@@ -183,7 +183,7 @@ export default function OtpLoginPage() {
         return;
       }
 
-      router.push("/");
+      router.push("/chat");
       router.refresh();
     } catch (err) {
       setError("Something went wrong. Please try again.");
@@ -200,13 +200,13 @@ export default function OtpLoginPage() {
   }, [otp, step]);
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-12 sm:px-6 lg:px-8 dark:bg-zinc-950">
-      <div className="w-full max-w-md space-y-8 bg-white p-8 rounded-2xl shadow-xl dark:bg-zinc-900 border border-gray-100 dark:border-zinc-800">
+    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-8 sm:px-6 lg:px-8 dark:bg-zinc-950">
+      <div className="w-full max-w-md space-y-6 sm:space-y-8 bg-white p-6 sm:p-8 rounded-2xl shadow-xl dark:bg-zinc-900 border border-gray-100 dark:border-zinc-800">
         <div className="flex flex-col items-center justify-center">
-          <Logo className="h-16 w-auto mb-6" />
-          <h2 className="text-center text-3xl font-bold tracking-tight text-gray-900 dark:text-white">
+          <Logo className="h-14 sm:h-16 w-auto mb-4 sm:mb-6" />
+          <h1 className="text-center text-2xl sm:text-3xl font-bold tracking-tight text-gray-900 dark:text-white">
             {step === "email" ? "Sign in with email" : "Enter verification code"}
-          </h2>
+          </h1>
           {step === "otp" && (
             <p className="mt-2 text-center text-sm text-gray-500 dark:text-gray-400">
               We sent a 6-digit code to{" "}

@@ -30,7 +30,7 @@ self.addEventListener("notificationclick", (event) => {
       }
       // Otherwise open a new window
       if (clients.openWindow) {
-        return clients.openWindow("/");
+        return clients.openWindow("/chat");
       }
     })
   );

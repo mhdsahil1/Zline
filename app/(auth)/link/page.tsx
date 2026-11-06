@@ -20,7 +20,7 @@ function LinkPageContent() {
 
   useEffect(() => {
     if (status === "authenticated") {
-      router.push("/");
+      router.push("/chat");
     }
   }, [status, router]);
 
@@ -58,7 +58,7 @@ function LinkPageContent() {
       // Step 2: Sign in with the original provider
       if (provider === "google") {
         // For Google, redirect through OAuth flow again — now it will succeed
-        await signIn("google", { callbackUrl: "/" });
+        await signIn("google", { callbackUrl: "/chat" });
       } else {
         // For email-otp, sign in with credentials (password) since we just verified it
         const signInRes = await signIn("credentials", {
@@ -73,7 +73,7 @@ function LinkPageContent() {
           return;
         }
 
-        router.push("/");
+        router.push("/chat");
         router.refresh();
       }
     } catch (err) {
@@ -87,13 +87,13 @@ function LinkPageContent() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-12 sm:px-6 lg:px-8 dark:bg-zinc-950">
-      <div className="w-full max-w-md space-y-8 bg-white p-8 rounded-2xl shadow-xl dark:bg-zinc-900 border border-gray-100 dark:border-zinc-800">
+    <div className="flex min-h-screen items-center justify-center bg-gray-50 px-4 py-8 sm:px-6 lg:px-8 dark:bg-zinc-950">
+      <div className="w-full max-w-md space-y-6 sm:space-y-8 bg-white p-6 sm:p-8 rounded-2xl shadow-xl dark:bg-zinc-900 border border-gray-100 dark:border-zinc-800">
         <div className="flex flex-col items-center justify-center">
-          <Logo className="h-16 w-auto mb-6" />
-          <h2 className="text-center text-3xl font-bold tracking-tight text-gray-900 dark:text-white">
+          <Logo className="h-14 sm:h-16 w-auto mb-4 sm:mb-6" />
+          <h1 className="text-center text-2xl sm:text-3xl font-bold tracking-tight text-gray-900 dark:text-white">
             Link your account
-          </h2>
+          </h1>
           <p className="mt-3 text-center text-sm text-gray-500 dark:text-gray-400">
             An account with{" "}
             <span className="font-medium text-gray-700 dark:text-gray-300">
