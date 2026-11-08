@@ -1,281 +1,306 @@
 <div align="center">
 
-# 💬 Zline
+<a href="https://zline.vercel.app">
+  <img src="./public/zline-animated.svg" alt="Zline - Private by Design. Secure by Default. AI-Supercharged." width="720" />
+</a>
 
-### **Private by Design. Secure by Default.**
+<br>
 
-*A modern real-time messaging platform built with Next.js, WebRTC, Socket.IO and MongoDB.*
+*A high-performance real-time messaging, WebRTC calling, and AI-grounded communication platform built with Next.js 14, Web Crypto E2EE, Socket.IO, WebRTC, NVIDIA Nemotron, and Obscura Headless Browser.*
 
 <br>
 
 [![Live Demo](https://img.shields.io/badge/🚀_Live_Demo-Visit-2563EB?style=for-the-badge)](https://zline.vercel.app)
-[![Version](https://img.shields.io/badge/Version-v1.0-success?style=for-the-badge)]()
+[![Version](https://img.shields.io/badge/Version-v2.0-indigo?style=for-the-badge)]()
 [![Status](https://img.shields.io/badge/Status-Stable-success?style=for-the-badge)]()
 [![License](https://img.shields.io/badge/License-MIT-yellow?style=for-the-badge)]()
 
 <br>
 
-![GitHub stars](https://img.shields.io/github/stars/mhdsahil1zline?style=for-the-badge)
-![GitHub forks](https://img.shields.io/github/forks/mhdsahil1/zline?style=for-the-badge)
-![GitHub issues](https://img.shields.io/github/issues/mhdsahil1/zline?style=for-the-badge)
-![GitHub last commit](https://img.shields.io/github/last-commit/mhdsahil1/zline?style=for-the-badge)
-![GitHub repo size](https://img.shields.io/github/repo-size/mhdsahil1/zline?style=for-the-badge)
-![GitHub top language](https://img.shields.io/github/languages/top/mhdsahil1/zline?style=for-the-badge)
-
-<br>
-
-![](https://komarev.com/ghpvc/?username=mhdsahil1&repo=zline&style=for-the-badge)
+![Next.js](https://img.shields.io/badge/Next.js_14-000000?style=for-the-badge&logo=next.js&logoColor=white)
+![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
+![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS_v4-38BDF8?style=for-the-badge&logo=tailwindcss&logoColor=white)
+![Socket.IO](https://img.shields.io/badge/Socket.IO-010101?style=for-the-badge&logo=socket.io&logoColor=white)
+![WebRTC](https://img.shields.io/badge/WebRTC-333333?style=for-the-badge&logo=webrtc&logoColor=white)
+![NVIDIA NIM](https://img.shields.io/badge/NVIDIA_NIM-76B900?style=for-the-badge&logo=nvidia&logoColor=white)
+![MongoDB](https://img.shields.io/badge/MongoDB_Atlas-47A248?style=for-the-badge&logo=mongodb&logoColor=white)
 
 </div>
 
 ---
 
-# ✨ Overview
+## 🌟 What's New in v2.0
 
-Zline is a production-ready end-to-end encrypted messaging platform focused on privacy, security and real-time communication.
-
-Built to explore modern distributed application development, Zline combines secure authentication, encrypted messaging, WebRTC calling, scalable socket communication and production deployment into one complete application.
-
-Rather than cloning an existing messenger, the goal was to understand how real communication platforms are engineered.
-
----
-
-# 📸 Preview
-
-<p align="center">
-
-<img src="./docs/login.png" width="31%">
-<img src="./docs/chat.png" width="31%">
-<img src="./docs/call.png" width="31%">
-
-</p>
+- 🤖 **Zline AI Assistant (NVIDIA Nemotron 3.5 Bolt E4B)**: Low-latency streaming assistant fine-tuned for high-speed multi-step reasoning, coding, logic puzzles, and conversational pairs.
+- 🌐 **Deep Web Grounding (Tavily + Obscura)**: Autonomous dual-layer web research engine that combines Tavily search discovery with the **Obscura Rust Headless Browser** for headless CDP rendering and dynamic page content extraction.
+- 🎨 **Originkit Particle Winding Loading System**: 3D interactive winding particle canvas that provides an immersive loading stage for route transitions and live AI reasoning stages.
+- 🌗 **Kokonut UI Theme Reveal Switcher**: Circular View Transitions API theme switcher with WAAPI morphing for fluid light/dark transitions.
+- 📊 **Interactive Live Polls**: Create and vote on real-time polls within 1-on-1 or group conversations with instant percentage bar charts.
+- 🎙️ **Rich Audio Notes & Visual Waveform**: In-browser audio recording with real-time waveform playback and duration tracking.
+- ⚡ **Enhanced E2EE**: Native Web Crypto API 2048-bit RSA-OAEP key exchange + AES-256-GCM message encryption with public key fingerprint auditing in Settings.
 
 ---
 
-# 🎥 Demo
+## 🚀 Key Features
 
-<p align="center">
+### 🤖 Intelligent AI & Autonomous Web Research
+- **NVIDIA Nemotron 3.5 Bolt E4B**: Integrated via high-throughput OpenAI-compatible NVIDIA NIM endpoint with server-sent event (SSE) token streaming.
+- **Obscura Headless Browser Engine**: Rust-based headless browser running via Chrome DevTools Protocol (CDP) in Docker to scrape and render dynamic JavaScript web pages.
+- **Tavily Search Discovery**: Autonomous classification of queries requiring real-time web intelligence.
+- **Interactive Source Citations**: Verified citations with titles, favicons, URLs, and snippets rendered below AI responses.
+- **Multi-Stage Reasoning Indicator**: Real-time status badges (*Searching*, *Browsing*, *Extracting*, *Analyzing*, *Reasoning*, *Generating*).
+- **Floating AI Launcher**: Dedicated bottom-right floating action button (FAB) for instant one-click access.
 
-<img src="./docs/demo.gif">
+### 🔒 Privacy & Cryptography
+- **True End-to-End Encryption (E2EE)**: Messages are encrypted in the sender's browser and only decrypted on the recipient's device.
+- **Native Web Crypto API**: Hardware-accelerated RSA-OAEP 2048-bit key exchange combined with AES-GCM 256-bit symmetric encryption.
+- **Local Key Management**: Cryptographic private keys reside strictly in the user's `localStorage` and never touch backend servers.
+- **Key Fingerprints**: View and verify cryptographic key fingerprints in the Settings panel.
+- **Disappearing Messages**: Set self-destruct timers on sensitive conversations.
+- **Account Data Shredding**: Complete user deletion routines that scrub keys, messages, and relationships.
 
-</p>
+### 💬 Rich Real-Time Messaging
+- **Instant Messaging**: Sub-10ms delivery latency via WebSockets (Socket.IO).
+- **Live Receipts**: Typing indicators, sent (`✓`), delivered (`✓✓`), and seen (`✓✓` blue) status receipts.
+- **Interactive Polls**: Create customizable multiple-choice polls with live voting tallies.
+- **Emoji Reactions**: Express reactions with quick emoji pickers (👍, ❤️, 😂, 😮, 😢, 🔥).
+- **Voice Messaging**: Crisp in-browser voice note recording and custom player.
+- **Media & File Sharing**: Upload images and documents with progress bars and download triggers.
+- **Message Controls**: Edit sent messages with visual edit tags, pin critical messages to the chat header, or star important notes.
+- **In-Chat & Global Search**: Filter messages locally within a thread or search across all chats and contacts.
+
+### 📞 HD Audio & Video Calling
+- **WebRTC Peer-to-Peer**: Direct peer connection for low-latency, crystal-clear 1-on-1 audio and video calls.
+- **Mesh Group Calling**: Multi-user voice and video conferences directly inside group rooms.
+- **Call Controls**: Real-time mute, camera toggling, screen sharing, and call duration logs.
+- **Call History**: Dedicated calls tab with incoming, outgoing, and missed call logs.
 
 ---
 
-# 🚀 Features
-
-| Authentication | Communication | Security |
-|---------------|--------------|----------|
-| ✅ Email Login | ✅ Real-time Chat | ✅ End-to-End Encryption |
-| ✅ Google OAuth | ✅ Voice Calls | ✅ JWT Authentication |
-| ✅ Session Management | ✅ Video Calls | ✅ HMAC Socket Auth |
-| ✅ Protected Routes | ✅ Group Calls | ✅ NoSQL Protection |
-| ✅ Account Recovery | ✅ Voice Messages | ✅ IDOR Protection |
-| ✅ Delete Account | ✅ Search Messages | ✅ Rate Limiting |
-| | ✅ Pin Messages | ✅ Secure Headers |
-| | ✅ Star Messages | ✅ CORS Protection |
-| | ✅ Push Notifications | ✅ Authorization Checks |
-
----
-
-# 🏗 Architecture
-
-<p align="center">
-
-<img src="./docs/architecture.png" width="900">
-
-</p>
+## 🏗 Architecture
 
 ```
-Browser
-     │
-     ▼
- Next.js Application
-     │
- ┌───────────────┐
- │               │
-Auth.js      Socket.IO
- │               │
- │           WebRTC
- └──────┬────────┘
-        ▼
- MongoDB Atlas
-        │
-        ▼
- Render Socket Server
-```
-
----
-
-# 💻 Tech Stack
-
-## Frontend
-
-![Next.js](https://img.shields.io/badge/Next.js-black?style=for-the-badge&logo=next.js)
-![React](https://img.shields.io/badge/React-20232A?style=for-the-badge&logo=react)
-![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript)
-![Tailwind CSS](https://img.shields.io/badge/TailwindCSS-38BDF8?style=for-the-badge&logo=tailwindcss)
-
----
-
-## Backend
-
-![Node.js](https://img.shields.io/badge/Node.js-339933?style=for-the-badge&logo=node.js)
-![MongoDB](https://img.shields.io/badge/MongoDB-4EA94B?style=for-the-badge&logo=mongodb)
-![Socket.IO](https://img.shields.io/badge/Socket.IO-black?style=for-the-badge&logo=socket.io)
-![Auth.js](https://img.shields.io/badge/Auth.js-black?style=for-the-badge)
-![JWT](https://img.shields.io/badge/JWT-black?style=for-the-badge&logo=jsonwebtokens)
-
----
-
-## Deployment
-
-![Vercel](https://img.shields.io/badge/Vercel-black?style=for-the-badge&logo=vercel)
-![Render](https://img.shields.io/badge/Render-46E3B7?style=for-the-badge&logo=render)
-
----
-
-# 🛡 Security
-
-> Security was treated as infrastructure, not as a feature.
-
-- 🔐 End-to-End Encryption
-- 🔐 JWT Authentication
-- 🔐 Google OAuth
-- 🔐 HMAC Socket Authentication
-- 🛡 Authorization Validation
-- 🛡 NoSQL Injection Protection
-- 🛡 IDOR Protection
-- 🛡 Rate Limiting
-- 🛡 Secure Headers
-- 🛡 Input Validation
-- 🛡 CORS Protection
-
----
-
-# 📂 Project Structure
-
-```
-app/
-components/
-hooks/
-lib/
-models/
-public/
-socket-server/
-types/
-utils/
+                       ┌────────────────────────────────────────────────────────┐
+                       │                     CLIENT BROWSER                     │
+                       │  Next.js 14 • React • Tailwind CSS • Web Crypto (E2EE) │
+                       └───────────┬────────────────────────────────┬───────────┘
+                                   │ HTTPS / REST                   │ WebSockets / WSS
+                                   ▼                                ▼
+                 ┌───────────────────────────────────┐    ┌──────────────────┐
+                 │       Next.js API Routes          │    │ Socket.IO Server │
+                 │  (Auth, Users, Messages, AI SSE)  │    │  (WebRTC Signal) │
+                 └─────┬───────────────────────┬─────┘    └─────────┬────────┘
+                       │                       │                    │
+          ┌────────────┴────────┐              │                    ▼
+          ▼                     ▼              │           WebRTC Peer Data
+   MongoDB Atlas           NextAuth.js         │         (Encrypted Media)
+   (Encrypted Data)      (JWT / OAuth)         │
+                                               ▼
+                             ┌───────────────────────────────────┐
+                             │    Zline AI Orchestration Engine  │
+                             └─────┬───────────────────────┬─────┘
+                                   │                       │
+                                   ▼                       ▼
+                         ┌───────────────────┐   ┌───────────────────────┐
+                         │ NVIDIA NIM API    │   │  Tavily Search API    │
+                         │ (Nemotron 3.5)    │   │  (URL Discovery)      │
+                         └───────────────────┘   └───────────┬───────────┘
+                                                             │
+                                                             ▼
+                                                 ┌───────────────────────┐
+                                                 │ Obscura CDP Browser   │
+                                                 │ (Rust Headless / DOM) │
+                                                 └───────────────────────┘
 ```
 
 ---
 
-# ⚙ Environment Variables
+## 💻 Tech Stack
+
+| Domain | Technology |
+|---|---|
+| **Framework** | [Next.js 14](https://nextjs.org/) (App Router, Server Actions, Route Handlers) |
+| **Language** | [TypeScript](https://www.typescriptlang.org/) (Strict Mode) |
+| **Styling** | [Tailwind CSS v4](https://tailwindcss.com/) with custom `@theme` tokens |
+| **AI Intelligence** | [NVIDIA NIM](https://build.nvidia.com/) (`nvidia/nemotron-3.5-bolt-e4b`) |
+| **Web Scraping** | [Obscura](https://github.com/h4ckf0r0day/obscura) (Rust-based CDP Headless Browser Engine) |
+| **Search Engine** | [Tavily Search API](https://tavily.com/) |
+| **Real-Time** | [Socket.IO](https://socket.io/) (WebSockets with HMAC handshake) |
+| **VoIP / Media** | [WebRTC](https://webrtc.org/) (P2P DataChannels, STUN/TURN traversal) |
+| **Database** | [MongoDB Atlas](https://www.mongodb.com/) via Mongoose ODM |
+| **Cryptography** | Native Browser [Web Crypto API](https://developer.mozilla.org/en-US/docs/Web/API/Web_Crypto_API) (RSA-OAEP 2048-bit + AES-GCM 256-bit) |
+| **Authentication** | [Auth.js / NextAuth](https://authjs.dev/) (Credentials, Google OAuth, JWT) |
+| **Components** | [Kokonut UI](https://kokonutui.com/) (SwitchButton & Procedural Avatars), [Originkit](https://originkit.dev/) (Particle Winding Canvas) |
+
+---
+
+## 📁 Project Structure
+
+```
+zline/
+├── app/
+│   ├── (auth)/                  # Login, Register, OTP verification routes
+│   ├── api/
+│   │   ├── ai/chat/             # AI Nemotron streaming & Obscura orchestration
+│   │   ├── auth/                # NextAuth credential and session routes
+│   │   ├── messages/            # Message persistence & E2EE envelope storage
+│   │   ├── reactions/           # Emoji reaction handling
+│   │   ├── users/               # Profile, avatar, settings & block routes
+│   │   └── upload/              # Media and file attachments
+│   ├── chat/                    # Core responsive messaging & calling dashboard
+│   ├── globals.css              # Tailwind v4 styles, custom tokens & animations
+│   ├── layout.tsx               # Root layout with ThemeProvider, Auth & SEO Schema
+│   ├── loading.tsx              # Originkit Particle Winding global loading stage
+│   └── page.tsx                 # High-converting product landing page
+├── components/
+│   ├── landing/                 # Navbar, Hero, Features, Showcase, Security, CTA
+│   ├── originkit/ui/            # Particle Winding 3D canvas engine
+│   ├── AiIcon.tsx               # Brand AI Platform vector component
+│   ├── CallModal.tsx            # 1-on-1 WebRTC audio/video call modal
+│   ├── GroupCallModal.tsx       # Multi-peer group WebRTC call modal
+│   ├── LoadingAnimation.tsx     # Reusable full-screen and inline loading states
+│   ├── SettingsPanel.tsx        # Settings (Privacy, Appearance, Security, E2EE)
+│   ├── SwitchButton.tsx         # Kokonut UI animated circular theme switcher
+│   ├── UserAvatar.tsx           # Multi-provider avatar renderer (URL, Kokonut, SVG)
+│   └── VoiceRecorder.tsx        # In-browser audio note recorder
+├── docker-compose.obscura.yml   # Obscura Rust Headless Browser container
+├── lib/
+│   ├── ai/                      # AI prompts, streaming parsers, and tool helpers
+│   ├── crypto.ts                # Client-side RSA-OAEP & AES-GCM cryptography
+│   ├── db.ts                    # MongoDB connection pooling
+│   ├── obscura/                 # CDP client & DOM content extractor
+│   ├── searchClassifier.ts      # Heuristic query intent detector
+│   └── tavily.ts                # Tavily search discovery integration
+├── socket-server/               # Standalone Node.js / Socket.IO signaling server
+└── public/                      # Static assets, SVG logos, AI icons, service worker
+```
+
+---
+
+## ⚙️ Environment Configuration
+
+Create a `.env` file in the root directory:
 
 ```env
-MONGODB_URI=
+# ==========================================
+# Database & Core URLs
+# ==========================================
+MONGODB_URI=mongodb+srv://<username>:<password>@cluster.mongodb.net/zline
+NEXT_PUBLIC_APP_URL=http://localhost:3000
+NEXT_PUBLIC_SOCKET_URL=http://localhost:5000
 
-AUTH_SECRET=
+# ==========================================
+# Authentication (NextAuth.js)
+# ==========================================
+NEXTAUTH_SECRET=generate-a-secure-random-32-char-string
+NEXTAUTH_URL=http://localhost:3000
 
-AUTH_GOOGLE_ID=
+# Google OAuth (Optional)
+AUTH_GOOGLE_ID=your-google-client-id.apps.googleusercontent.com
+AUTH_GOOGLE_SECRET=your-google-client-secret
 
-AUTH_GOOGLE_SECRET=
+# ==========================================
+# Zline AI (NVIDIA NIM & Nemotron 3.5)
+# ==========================================
+NVIDIA_API_KEY=nvapi-your-nvidia-nim-api-key
+NVIDIA_BASE_URL=https://integrate.api.nvidia.com/v1
+NVIDIA_MODEL=nvidia/nemotron-3.5-bolt-e4b
 
-NEXT_PUBLIC_SOCKET_URL=
+# ==========================================
+# Real-Time Search & Browser Automation
+# ==========================================
+TAVILY_API_KEY=tvly-your-tavily-api-key
+OBSCURA_CDP_URL=http://127.0.0.1:9222
 
-NEXT_PUBLIC_APP_URL=
+# ==========================================
+# Web Push Notifications (Optional)
+# ==========================================
+NEXT_PUBLIC_VAPID_PUBLIC_KEY=your-vapid-public-key
+VAPID_PRIVATE_KEY=your-vapid-private-key
+VAPID_SUBJECT=mailto:support@zline.app
 ```
 
 ---
 
-# 🚀 Getting Started
+## 🚀 Getting Started
 
+### 1. Clone & Install Dependencies
 ```bash
-git clone https://github.com/YOUR_USERNAME/zline.git
-
+git clone https://github.com/mhdsahil1/zline.git
 cd zline
-
 npm install
+```
 
+### 2. Start the Obscura Headless Browser (Optional for Deep Web Scraping)
+Run Obscura in Docker via Chrome DevTools Protocol:
+```bash
+docker-compose -f docker-compose.obscura.yml up -d
+```
+*Note: If Obscura is not running, Zline AI automatically falls back gracefully to Tavily's high-speed contextual search snippets.*
+
+### 3. Start the Socket Signaling Server
+```bash
+cd socket-server
+npm install
+npm run start
+```
+
+### 4. Run the Next.js Development Server
+In the project root:
+```bash
 npm run dev
 ```
+Open [http://localhost:3000](http://localhost:3000) in your browser.
 
 ---
 
-# 📈 Roadmap
+## 🛡️ Security Architecture
 
-## ✅ Version 1.0
+Zline enforces a zero-trust model for messaging:
 
-- [x] Authentication
-- [x] Google OAuth
-- [x] Secure Messaging
-- [x] Voice & Video Calls
-- [x] Group Calls
-- [x] Push Notifications
-- [x] Production Deployment
-- [x] Security Hardening
-
-## 🔮 Future
-
-- [ ] Desktop Client
-
-- [ ] Mobile App
-
-- [ ] Friend System
-
-- [ ] Shared Media
-
-- [ ] Message Scheduling
+1. **Key Generation**: When a user registers or signs in, a unique 2048-bit RSA key pair is generated inside the browser via `window.crypto.subtle`.
+2. **Key Distribution**: Only the public key (JWK) is published to the user profile on MongoDB. The private key remains locked in client-side storage.
+3. **Hybrid Encryption**:
+   - For every chat message, the sender generates a random 256-bit AES-GCM session key.
+   - The message payload is encrypted using this AES key with an initialization vector (IV).
+   - The AES key is encrypted with the recipient's public RSA key.
+4. **Transport & Storage**: The server only transports and stores ciphertext envelopes. Neither database administrators nor intercepting proxies can decrypt user conversations.
+5. **Session Verification**: Both participants can view their cryptographic public key fingerprints directly in the **Settings → Encryption** menu.
 
 ---
 
-# 🤝 Contributing
+## 📈 Roadmap
 
-Contributions, ideas and improvements are welcome.
-
-Please open an Issue first before submitting major changes.
-
----
-
-# 📜 License
-
-This project is licensed under the MIT License.
+- [x] **v1.0**: Core WebSocket chat, WebRTC audio/video calls, Google OAuth, E2EE key exchange.
+- [x] **v2.0**: NVIDIA Nemotron AI Assistant, Obscura Rust headless browser integration, Tavily grounding, Originkit 3D canvas loading, Kokonut UI themes, Live Polls, Voice Notes.
+- [ ] **v2.1**: End-to-end encrypted file vault with client-side chunking.
+- [ ] **v2.2**: Multi-device cryptographic session synchronization with QR-code device pairing.
+- [ ] **v3.0**: Native desktop clients (Tauri) and mobile wrappers (Capacitor/React Native).
 
 ---
 
-# 🙏 Acknowledgements
+## 🤝 Contributing
 
-Special thanks to the open-source community and the maintainers of:
+Contributions are warmly welcomed! Feel free to submit issues, propose features, or open pull requests:
 
-- Next.js
-- React
-- MongoDB
-- Socket.IO
-- WebRTC
-- Tailwind CSS
-- Auth.js
-- Vercel
-- Render
+1. Fork the Project
+2. Create your Feature Branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your Changes (`git commit -m 'Add some AmazingFeature'`)
+4. Push to the Branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
 
-Without their work, projects like this would be significantly harder to build.
+---
+
+## 📜 License
+
+Distributed under the **MIT License**. See `LICENSE` for more information.
 
 ---
 
 <div align="center">
 
-# 💬 Zline v1.0
+**Zline • Private by Design. Secure by Default.**
 
-### *Private by Design. Secure by Default.*
-
-*"Some projects are built to impress.*
-
-*Others are built to teach.*
-
-**Zline was built to do both."*
-
-⭐ If you found this project interesting, consider giving it a star.
-
----
-
-**Built with curiosity, persistence, and an unreasonable amount of debugging.**
+Made with ❤️ by [Muhammed Sahil](https://github.com/mhdsahil1) and contributors.
 
 </div>
