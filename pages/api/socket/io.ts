@@ -59,6 +59,40 @@ const ioHandler = (req: NextApiRequest, res: any) => {
         }
       });
 
+      // ─── Multi-Device Identity & Revocation ─────────────────────────────
+      socket.on("join_device", (data: { deviceId: string; userId?: string }) => {
+        if (data?.deviceId) {
+          socket.join(data.deviceId);
+          (socket as any).deviceId = data.deviceId;
+          console.log(`Socket ${socket.id} joined device room ${data.deviceId}`);
+        }
+      });
+
+      socket.on("join_pairing_room", (pairingId: string) => {
+        if (pairingId) {
+          socket.join(pairingId);
+          console.log(`Socket ${socket.id} joined pairing room ${pairingId}`);
+        }
+      });
+
+      socket.on("device_paired", (data: { pairingId: string; deviceId: string; userId: string }) => {
+        if (data?.pairingId) {
+          io.to(data.pairingId).emit("pairing_approved", data);
+        }
+        if (data?.userId) {
+          io.to(data.userId).emit("device_list_updated");
+        }
+      });
+
+      socket.on("device_revoked", (data: { deviceId: string; userId: string }) => {
+        if (data?.deviceId) {
+          io.to(data.deviceId).emit("device_revoked", { deviceId: data.deviceId });
+        }
+        if (data?.userId) {
+          io.to(data.userId).emit("device_list_updated");
+        }
+      });
+
       socket.on("join_group_room", (data) => {
         // data: { chatId }
         socket.join(data.chatId);
@@ -139,6 +173,15 @@ const ioHandler = (req: NextApiRequest, res: any) => {
           messageId: data.messageId,
           status: "delivered",
         });
+      });
+
+      // ─── Disappearing Messages Timer ──────────────────────────────────
+      socket.on("timer_updated", (data: { chatId?: string; receiverId?: string; timer: number }) => {
+        if (data.chatId) {
+          socket.to(data.chatId).emit("timer_updated", data);
+        } else if (data.receiverId) {
+          io.to(data.receiverId).emit("timer_updated", data);
+        }
       });
 
       // ─── Polls ──────────────────────────────────────────────────────────

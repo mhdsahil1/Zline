@@ -56,7 +56,41 @@ export const SocketProvider = ({ children }: { children: React.ReactNode }) => {
         setIsConnected(true);
         if (session?.user?.id) {
           socketInstance?.emit("join", session.user.id);
+          try {
+            const deviceId = localStorage.getItem(`zline_device_id_${session.user.id}`);
+            if (deviceId) {
+              socketInstance?.emit("join_device", { deviceId, userId: session.user.id });
+            }
+          } catch {
+            // ignore
+          }
         }
+      });
+
+      // ─── Multi-Device Revocation Event ─────────────────────────────────
+      socketInstance.on("device_revoked", (data: { deviceId: string }) => {
+        try {
+          const currentDeviceId = session?.user?.id
+            ? localStorage.getItem(`zline_device_id_${session.user.id}`)
+            : null;
+          if (data?.deviceId && data.deviceId === currentDeviceId) {
+            console.warn("This device has been revoked by the account owner.");
+            if (session?.user?.id) {
+              localStorage.removeItem(`zline_device_id_${session.user.id}`);
+              localStorage.removeItem(`zline_device_fingerprint_${session.user.id}`);
+              localStorage.removeItem(`zline_e2e_public_key_${session.user.id}`);
+              localStorage.removeItem(`zline_e2e_private_key_${session.user.id}`);
+            }
+            signOut({ callbackUrl: "/login?revoked=true" });
+          }
+        } catch (e) {
+          console.error("Error handling device revocation:", e);
+        }
+      });
+
+      // ─── Multi-Device List Updated Event ───────────────────────────────
+      socketInstance.on("device_list_updated", () => {
+        window.dispatchEvent(new CustomEvent("zline:devices_updated"));
       });
 
       socketInstance.on("disconnect", (reason) => {

@@ -4,7 +4,9 @@ import React, { useState, useEffect, useCallback } from "react";
 import {
   Settings, X, Shield, Bell, Palette, UserX, Lock, LogOut, Loader2,
   Eye, EyeOff, Volume2, VolumeX, Monitor, Moon, Sun, ChevronRight,
-  Trash2, AlertTriangle, CheckCircle, Camera, Sparkles
+  Trash2, AlertTriangle, CheckCircle, Camera, Sparkles, Smartphone,
+  Laptop, Tablet, Globe, QrCode, Edit3, CheckCircle2, RefreshCw, Key,
+  SlidersHorizontal, Type, Columns
 } from "lucide-react";
 import { signOut } from "next-auth/react";
 import { useSocket } from "@/components/SocketProvider";
@@ -12,6 +14,8 @@ import UserAvatar from "@/components/UserAvatar";
 import AvatarModal from "@/components/AvatarModal";
 import { useTheme } from "@/components/ThemeProvider";
 import SwitchButton from "@/components/SwitchButton";
+import DevicePairingModal from "@/components/DevicePairingModal";
+import { formatDistanceToNow } from "date-fns";
 
 interface SettingsPanelProps {
   isOpen: boolean;
@@ -37,6 +41,121 @@ export default function SettingsPanel({ isOpen, onClose, session }: SettingsPane
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState("");
   const [deleteSuccess, setDeleteSuccess] = useState(false);
+
+  // Linked Devices states (v3.0 Multi-Device E2EE)
+  const [devices, setDevices] = useState<any[]>([]);
+  const [devicesLoading, setDevicesLoading] = useState(false);
+  const [showPairingModal, setShowPairingModal] = useState(false);
+  const [deviceToRename, setDeviceToRename] = useState<any | null>(null);
+  const [renameInput, setRenameInput] = useState("");
+  const [deviceToRevoke, setDeviceToRevoke] = useState<any | null>(null);
+  const [revoking, setRevoking] = useState(false);
+  const [viewingFingerprint, setViewingFingerprint] = useState<any | null>(null);
+
+  // Sizing & Density state
+  const [chatFontSize, setChatFontSize] = useState<"sm" | "md" | "lg" | "xl">("md");
+  const [chatListDensity, setChatListDensity] = useState<"compact" | "normal" | "spacious">("normal");
+  const [sidebarWidth, setSidebarWidth] = useState<number>(360);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const savedFontSize = localStorage.getItem("zline_chat_font_size") as "sm" | "md" | "lg" | "xl" | null;
+      if (savedFontSize) setChatFontSize(savedFontSize);
+      const savedDensity = localStorage.getItem("zline_chat_list_density") as "compact" | "normal" | "spacious" | null;
+      if (savedDensity) setChatListDensity(savedDensity);
+      const savedWidth = localStorage.getItem("zline_sidebar_width");
+      if (savedWidth) setSidebarWidth(parseInt(savedWidth, 10) || 360);
+    }
+  }, [isOpen]);
+
+  const handleUpdateFontSize = (size: "sm" | "md" | "lg" | "xl") => {
+    setChatFontSize(size);
+    try {
+      localStorage.setItem("zline_chat_font_size", size);
+      window.dispatchEvent(new CustomEvent("zline:chat_size_changed", { detail: { fontSize: size } }));
+    } catch {}
+  };
+
+  const handleUpdateDensity = (density: "compact" | "normal" | "spacious") => {
+    setChatListDensity(density);
+    try {
+      localStorage.setItem("zline_chat_list_density", density);
+      window.dispatchEvent(new CustomEvent("zline:chat_size_changed", { detail: { density } }));
+    } catch {}
+  };
+
+  const handleUpdateSidebarWidth = (width: number) => {
+    setSidebarWidth(width);
+    try {
+      localStorage.setItem("zline_sidebar_width", width.toString());
+      window.dispatchEvent(new CustomEvent("zline:chat_size_changed", { detail: { sidebarWidth: width } }));
+    } catch {}
+  };
+
+  const fetchDevices = useCallback(async () => {
+    setDevicesLoading(true);
+    try {
+      const res = await fetch("/api/devices");
+      if (res.ok) {
+        const data = await res.json();
+        setDevices(data.devices || []);
+      }
+    } catch (err) {
+      console.error("Failed to fetch devices:", err);
+    } finally {
+      setDevicesLoading(false);
+    }
+  }, []);
+
+  const handleRenameDevice = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!deviceToRename || !renameInput.trim()) return;
+    try {
+      const res = await fetch("/api/devices", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ deviceId: deviceToRename.deviceId, deviceName: renameInput.trim() }),
+      });
+      if (res.ok) {
+        setDeviceToRename(null);
+        fetchDevices();
+      }
+    } catch (err) {
+      console.error("Failed to rename device:", err);
+    }
+  };
+
+  const handleRevokeDevice = async () => {
+    if (!deviceToRevoke) return;
+    setRevoking(true);
+    try {
+      const res = await fetch(`/api/devices?deviceId=${deviceToRevoke.deviceId}`, {
+        method: "DELETE",
+      });
+      if (res.ok) {
+        if (socket && socket.connected) {
+          socket.emit("device_revoked", {
+            deviceId: deviceToRevoke.deviceId,
+            userId: session?.user?.id,
+          });
+        }
+        setDeviceToRevoke(null);
+        fetchDevices();
+      }
+    } catch (err) {
+      console.error("Failed to revoke device:", err);
+    } finally {
+      setRevoking(false);
+    }
+  };
+
+  useEffect(() => {
+    const handleDevicesUpdated = () => {
+      fetchDevices();
+    };
+    window.addEventListener("zline:devices_updated", handleDevicesUpdated);
+    return () => window.removeEventListener("zline:devices_updated", handleDevicesUpdated);
+  }, [fetchDevices]);
 
   const fetchSettings = useCallback(async () => {
     setLoading(true);
@@ -68,6 +187,7 @@ export default function SettingsPanel({ isOpen, onClose, session }: SettingsPane
     if (isOpen) {
       fetchSettings();
       fetchBlocked();
+      fetchDevices();
       setActiveSection(null);
       // Reset delete account state when panel opens
       setDeleteStep("info");
@@ -296,6 +416,115 @@ export default function SettingsPanel({ isOpen, onClose, session }: SettingsPane
               );
             })}
           </div>
+
+          {/* Chat Message Text Size */}
+          <div className="mx-4 mt-4 p-3 bg-gray-50 dark:bg-zinc-800/60 rounded-2xl border border-gray-200/80 dark:border-zinc-700/80 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Type className="w-4 h-4 text-blue-600 dark:text-blue-400" />
+                <p className="text-xs font-semibold text-gray-900 dark:text-white">Chat Message Size</p>
+              </div>
+              <span className="text-[10px] uppercase font-bold text-blue-600 dark:text-blue-400 px-1.5 py-0.5 bg-blue-50 dark:bg-blue-900/30 rounded-md">
+                {chatFontSize}
+              </span>
+            </div>
+            <p className="text-[10px] text-gray-400 dark:text-zinc-500">
+              Adjusts message bubble font size, reading spacing, and AI response scale.
+            </p>
+            <div className="grid grid-cols-4 gap-1 pt-1">
+              {(["sm", "md", "lg", "xl"] as const).map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  onClick={() => handleUpdateFontSize(s)}
+                  className={`py-1.5 text-xs font-semibold rounded-lg border transition-all ${
+                    chatFontSize === s
+                      ? "bg-blue-600 text-white border-blue-600 shadow-sm"
+                      : "bg-white dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 border-gray-200 dark:border-zinc-700 hover:bg-gray-50"
+                  }`}
+                >
+                  {s === "sm" ? "Small" : s === "md" ? "Medium" : s === "lg" ? "Large" : "XL"}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Chat List Density */}
+          <div className="mx-4 mt-3 p-3 bg-gray-50 dark:bg-zinc-800/60 rounded-2xl border border-gray-200/80 dark:border-zinc-700/80 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <SlidersHorizontal className="w-4 h-4 text-purple-600 dark:text-purple-400" />
+                <p className="text-xs font-semibold text-gray-900 dark:text-white">Chat List Density</p>
+              </div>
+              <span className="text-[10px] capitalize font-bold text-purple-600 dark:text-purple-400 px-1.5 py-0.5 bg-purple-50 dark:bg-purple-900/30 rounded-md">
+                {chatListDensity}
+              </span>
+            </div>
+            <p className="text-[10px] text-gray-400 dark:text-zinc-500">
+              Scale conversation row height and avatar sizes in your chat list.
+            </p>
+            <div className="grid grid-cols-3 gap-1 pt-1">
+              {(["compact", "normal", "spacious"] as const).map((d) => (
+                <button
+                  key={d}
+                  type="button"
+                  onClick={() => handleUpdateDensity(d)}
+                  className={`py-1.5 text-xs font-semibold capitalize rounded-lg border transition-all ${
+                    chatListDensity === d
+                      ? "bg-purple-600 text-white border-purple-600 shadow-sm"
+                      : "bg-white dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 border-gray-200 dark:border-zinc-700 hover:bg-gray-50"
+                  }`}
+                >
+                  {d}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Chat List Sidebar Width */}
+          <div className="mx-4 mt-3 p-3 bg-gray-50 dark:bg-zinc-800/60 rounded-2xl border border-gray-200/80 dark:border-zinc-700/80 space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Columns className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
+                <p className="text-xs font-semibold text-gray-900 dark:text-white">Chat List Width (Desktop)</p>
+              </div>
+              <span className="text-[10px] font-mono font-bold text-emerald-600 dark:text-emerald-400 px-1.5 py-0.5 bg-emerald-50 dark:bg-emerald-900/30 rounded-md">
+                {sidebarWidth}px
+              </span>
+            </div>
+            <p className="text-[10px] text-gray-400 dark:text-zinc-500">
+              You can also click and drag the divider between the chat list and conversation view.
+            </p>
+            <input
+              type="range"
+              min={260}
+              max={560}
+              step={10}
+              value={sidebarWidth}
+              onChange={(e) => handleUpdateSidebarWidth(parseInt(e.target.value, 10))}
+              className="w-full h-1.5 bg-gray-200 dark:bg-zinc-700 rounded-lg appearance-none cursor-pointer accent-emerald-600"
+            />
+            <div className="flex gap-1 pt-1">
+              {[
+                { label: "Compact", w: 280 },
+                { label: "Default", w: 360 },
+                { label: "Wide", w: 460 },
+              ].map((preset) => (
+                <button
+                  key={preset.label}
+                  type="button"
+                  onClick={() => handleUpdateSidebarWidth(preset.w)}
+                  className={`flex-1 py-1 text-[11px] font-medium rounded-lg border transition-colors ${
+                    sidebarWidth === preset.w
+                      ? "bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 border-emerald-300 dark:border-emerald-700 font-semibold"
+                      : "bg-white dark:bg-zinc-800 text-gray-600 dark:text-zinc-400 border-gray-200 dark:border-zinc-700 hover:bg-gray-50"
+                  }`}
+                >
+                  {preset.label}
+                </button>
+              ))}
+            </div>
+          </div>
         </div>
       );
     }
@@ -343,26 +572,263 @@ export default function SettingsPanel({ isOpen, onClose, session }: SettingsPane
       );
     }
 
-    if (activeSection === "encryption") {
-      const userId = session?.user?.id;
-      const publicKeyJwk = typeof window !== "undefined" && userId
-        ? localStorage.getItem(`zline_e2e_public_key_${userId}`)
+    if (activeSection === "devices") {
+      const currentDevId = typeof window !== "undefined" && session?.user?.id
+        ? localStorage.getItem(`zline_device_id_${session.user.id}`)
         : null;
-
-      // Generate a short fingerprint from the public key
-      let fingerprint = "Not available";
-      if (publicKeyJwk) {
-        try {
-          const hash = publicKeyJwk.slice(0, 64);
-          fingerprint = hash.replace(/(.{4})/g, "$1 ").trim().toUpperCase().slice(0, 40);
-        } catch {
-          fingerprint = "Unable to generate";
-        }
-      }
 
       return (
         <div className="py-2">
-          <button onClick={() => setActiveSection(null)} className="flex items-center gap-2 px-4 py-2 text-xs text-gray-500 dark:text-zinc-400 hover:text-blue-600 transition-colors">
+          <button
+            onClick={() => setActiveSection(null)}
+            className="flex items-center gap-2 px-4 py-2 text-xs text-gray-500 dark:text-zinc-400 hover:text-blue-600 transition-colors cursor-pointer"
+          >
+            ← Back
+          </button>
+
+          <div className="px-4 py-2 flex items-center justify-between">
+            <div>
+              <h4 className="text-xs font-bold text-gray-900 dark:text-white uppercase tracking-wider">
+                Linked Devices
+              </h4>
+              <p className="text-[11px] text-gray-500 dark:text-zinc-400">
+                Independent E2EE v3.0 identities
+              </p>
+            </div>
+            <button
+              onClick={() => setShowPairingModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-xs font-semibold shadow-sm transition-all cursor-pointer"
+            >
+              <QrCode className="w-3.5 h-3.5" />
+              <span>Link Device</span>
+            </button>
+          </div>
+
+          <div className="px-4 py-2">
+            <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-900/40 rounded-xl p-3 text-[11px] text-blue-700 dark:text-blue-300">
+              Each device holds its own isolated private key. Messages are multi-encrypted for all active devices.
+            </div>
+          </div>
+
+          <div className="px-4 py-1 divide-y divide-gray-100 dark:divide-zinc-800">
+            {devicesLoading ? (
+              <div className="py-12 flex flex-col items-center justify-center gap-2 text-gray-400">
+                <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
+                <span className="text-xs">Loading authorized devices...</span>
+              </div>
+            ) : devices.length === 0 ? (
+              <div className="py-8 text-center text-xs text-gray-400">
+                No linked devices found.
+              </div>
+            ) : (
+              devices.map((dev: any) => {
+                const isCurrent = dev.deviceId === currentDevId;
+                let DeviceIcon = Globe;
+                if (dev.deviceType === "laptop") DeviceIcon = Laptop;
+                else if (dev.deviceType === "desktop") DeviceIcon = Monitor;
+                else if (dev.deviceType === "mobile") DeviceIcon = Smartphone;
+                else if (dev.deviceType === "tablet") DeviceIcon = Tablet;
+
+                return (
+                  <div key={dev.deviceId} className="py-3 flex items-start justify-between gap-2">
+                    <div className="flex items-start gap-3 min-w-0">
+                      <div className={`p-2 rounded-xl shrink-0 ${isCurrent ? "bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400" : "bg-gray-100 text-gray-600 dark:bg-zinc-800 dark:text-zinc-400"}`}>
+                        <DeviceIcon className="w-4 h-4" />
+                      </div>
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <p className="text-xs font-bold text-gray-900 dark:text-white truncate">
+                            {dev.deviceName}
+                          </p>
+                          {isCurrent && (
+                            <span className="px-1.5 py-0.2 rounded-md bg-blue-100 dark:bg-blue-900/40 text-blue-700 dark:text-blue-300 text-[9px] font-bold">
+                              This Device
+                            </span>
+                          )}
+                          {dev.isVerified && !dev.isRevoked && (
+                            <span className="px-1.5 py-0.2 rounded-md bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-300 text-[9px] font-semibold flex items-center gap-0.5">
+                              <CheckCircle2 className="w-2.5 h-2.5" /> Verified
+                            </span>
+                          )}
+                          {dev.isRevoked && (
+                            <span className="px-1.5 py-0.2 rounded-md bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-300 text-[9px] font-bold">
+                              Revoked
+                            </span>
+                          )}
+                        </div>
+
+                        <p className="text-[10px] text-gray-400 dark:text-zinc-500 mt-0.5">
+                          Active: {formatDistanceToNow(new Date(dev.lastActiveAt), { addSuffix: true })}
+                        </p>
+                        <p className="text-[10px] font-mono text-gray-400 dark:text-zinc-500 truncate mt-0.5" title={dev.fingerprint}>
+                          FP: {dev.fingerprint ? dev.fingerprint.substring(0, 19) + "..." : "Available"}
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* Actions */}
+                    <div className="flex items-center gap-1 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setViewingFingerprint(dev)}
+                        className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-gray-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
+                        title="View Full Cryptographic Fingerprint"
+                      >
+                        <Key className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDeviceToRename(dev);
+                          setRenameInput(dev.deviceName);
+                        }}
+                        className="p-1.5 text-gray-400 hover:text-gray-700 dark:hover:text-zinc-200 hover:bg-gray-100 dark:hover:bg-zinc-800 rounded-lg transition-colors"
+                        title="Rename Device"
+                      >
+                        <Edit3 className="w-3.5 h-3.5" />
+                      </button>
+                      {!dev.isRevoked && (
+                        <button
+                          type="button"
+                          onClick={() => setDeviceToRevoke(dev)}
+                          className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                          title="Revoke Device"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          {/* Rename Device Modal */}
+          {deviceToRename && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+              <form onSubmit={handleRenameDevice} className="w-full max-w-xs bg-white dark:bg-zinc-900 p-5 rounded-2xl shadow-xl space-y-4 border border-gray-100 dark:border-zinc-800">
+                <h4 className="text-sm font-bold text-gray-900 dark:text-white">Rename Device</h4>
+                <input
+                  type="text"
+                  value={renameInput}
+                  onChange={(e) => setRenameInput(e.target.value)}
+                  className="w-full text-xs px-3 py-2 rounded-xl border border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-800 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-600"
+                  required
+                />
+                <div className="flex gap-2 justify-end">
+                  <button
+                    type="button"
+                    onClick={() => setDeviceToRename(null)}
+                    className="px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-100 dark:hover:bg-zinc-800 rounded-lg"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-3 py-1.5 text-xs font-semibold bg-blue-600 text-white rounded-lg hover:bg-blue-500"
+                  >
+                    Save
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
+
+          {/* Revoke Device Confirmation Modal */}
+          {deviceToRevoke && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+              <div className="w-full max-w-sm bg-white dark:bg-zinc-900 p-5 rounded-2xl shadow-xl space-y-3 border border-gray-100 dark:border-zinc-800">
+                <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-950/40 text-red-600 flex items-center justify-center mx-auto">
+                  <AlertTriangle className="w-5 h-5" />
+                </div>
+                <h4 className="text-sm font-bold text-center text-gray-900 dark:text-white">
+                  Revoke Device Authorization?
+                </h4>
+                <p className="text-xs text-center text-gray-500 dark:text-zinc-400">
+                  Are you sure you want to unlink <strong>{deviceToRevoke.deviceName}</strong>? It will immediately lose access, be disconnected from active sessions, and be excluded from all future encrypted messages.
+                </p>
+                <div className="flex gap-2 pt-2">
+                  <button
+                    type="button"
+                    disabled={revoking}
+                    onClick={() => setDeviceToRevoke(null)}
+                    className="flex-1 py-2 text-xs font-semibold text-gray-700 dark:text-zinc-300 bg-gray-100 dark:bg-zinc-800 hover:bg-gray-200 dark:hover:bg-zinc-700 rounded-xl"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    disabled={revoking}
+                    onClick={handleRevokeDevice}
+                    className="flex-1 py-2 text-xs font-semibold text-white bg-red-600 hover:bg-red-500 rounded-xl flex items-center justify-center gap-1.5"
+                  >
+                    {revoking ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : "Revoke Access"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* View Fingerprint Modal */}
+          {viewingFingerprint && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+              <div className="w-full max-w-sm bg-white dark:bg-zinc-900 p-5 rounded-2xl shadow-xl space-y-4 border border-gray-100 dark:border-zinc-800">
+                <div className="flex items-center justify-between">
+                  <h4 className="text-sm font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                    <Key className="w-4 h-4 text-blue-600" />
+                    <span>Cryptographic Fingerprint</span>
+                  </h4>
+                  <button
+                    onClick={() => setViewingFingerprint(null)}
+                    className="text-gray-400 hover:text-gray-600 dark:hover:text-zinc-200"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+                <div>
+                  <p className="text-xs text-gray-500 dark:text-zinc-400 mb-1">
+                    Device: <strong>{viewingFingerprint.deviceName}</strong> ({viewingFingerprint.deviceType})
+                  </p>
+                  <p className="text-[11px] font-mono p-3 bg-gray-50 dark:bg-zinc-800 rounded-xl border border-gray-200 dark:border-zinc-700 text-gray-900 dark:text-white leading-relaxed break-all select-all">
+                    {viewingFingerprint.fingerprint}
+                  </p>
+                </div>
+                <p className="text-[10px] text-gray-400 dark:text-zinc-500">
+                  This SHA-256 fingerprint uniquely authenticates this device's RSA-OAEP public key. Verify it against the fingerprint displayed on the device itself to prevent key substitution.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setViewingFingerprint(null)}
+                  className="w-full py-2 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-500"
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Pairing Modal */}
+          <DevicePairingModal
+            isOpen={showPairingModal}
+            onClose={() => setShowPairingModal(false)}
+            isApprovingDevice={true}
+            currentUserSession={session}
+            onDeviceApproved={fetchDevices}
+          />
+        </div>
+      );
+    }
+
+    if (activeSection === "encryption") {
+      const userId = session?.user?.id;
+      const localFp = typeof window !== "undefined" && userId
+        ? localStorage.getItem(`zline_device_fingerprint_${userId}`)
+        : null;
+
+      return (
+        <div className="py-2">
+          <button onClick={() => setActiveSection(null)} className="flex items-center gap-2 px-4 py-2 text-xs text-gray-500 dark:text-zinc-400 hover:text-blue-600 transition-colors cursor-pointer">
             ← Back
           </button>
           <h4 className="px-4 py-2 text-xs font-bold text-gray-500 dark:text-zinc-400 uppercase tracking-wider">End-to-End Encryption</h4>
@@ -370,25 +836,36 @@ export default function SettingsPanel({ isOpen, onClose, session }: SettingsPane
             <div className="bg-green-50 dark:bg-green-900/20 rounded-xl p-3 border border-green-200 dark:border-green-900/50">
               <div className="flex items-center gap-2 mb-2">
                 <Lock className="w-4 h-4 text-green-600" />
-                <span className="text-xs font-semibold text-green-700 dark:text-green-400">E2EE Active</span>
+                <span className="text-xs font-semibold text-green-700 dark:text-green-400">E2EE v3.0 Multi-Device Active</span>
               </div>
               <p className="text-[10px] text-green-600 dark:text-green-400">
-                Your messages are end-to-end encrypted. Only you and the recipient can read them.
+                Your messages are encrypted end-to-end with AES-256-GCM. Independent 2048-bit RSA keys wrap the message key for each of your authorized devices.
               </p>
             </div>
           </div>
           <div className="px-4 py-3">
             <p className="text-[10px] text-gray-500 dark:text-zinc-400 font-semibold uppercase tracking-wider mb-1">
-              Your Public Key Fingerprint
+              Current Device Fingerprint (SHA-256)
             </p>
-            <p className="text-xs font-mono text-gray-700 dark:text-zinc-300 bg-gray-50 dark:bg-zinc-800 rounded-lg p-2 break-all">
-              {fingerprint}
+            <p className="text-xs font-mono text-gray-700 dark:text-zinc-300 bg-gray-50 dark:bg-zinc-800 rounded-lg p-2.5 break-all select-all">
+              {localFp || "SHA-256 Verified"}
             </p>
+          </div>
+          <div className="px-4 py-2">
+            <button
+              onClick={() => setActiveSection("devices")}
+              className="w-full flex items-center justify-between p-3 rounded-xl border border-gray-200 dark:border-zinc-800 hover:bg-gray-50 dark:hover:bg-zinc-800 transition-colors text-xs font-semibold text-gray-800 dark:text-zinc-200"
+            >
+              <div className="flex items-center gap-2">
+                <Smartphone className="w-4 h-4 text-blue-600" />
+                <span>Manage Linked Devices ({devices.length})</span>
+              </div>
+              <ChevronRight className="w-4 h-4 text-gray-400" />
+            </button>
           </div>
           <div className="px-4 py-3">
             <p className="text-[10px] text-gray-400 dark:text-zinc-500">
-              Your private key is stored only on this device and is never sent to the server.
-              If you clear browser data, your key will be regenerated and old encrypted messages may become unreadable.
+              Private keys are stored securely in local browser IndexedDB and are never transmitted to the server.
             </p>
           </div>
         </div>
@@ -605,11 +1082,12 @@ export default function SettingsPanel({ isOpen, onClose, session }: SettingsPane
 
     // Main menu
     const menuItems = [
+      { id: "devices", label: "Linked Devices", icon: Smartphone, desc: `${devices.length} active • E2EE v3.0` },
       { id: "privacy", label: "Privacy", icon: Shield, desc: "Read receipts, last seen" },
       { id: "notifications", label: "Notifications", icon: Bell, desc: "Sounds, previews" },
       { id: "appearance", label: "Appearance", icon: Palette, desc: "Theme settings" },
       { id: "blocked", label: "Blocked Users", icon: UserX, desc: `${blockedUsers.length} blocked` },
-      { id: "encryption", label: "Encryption", icon: Lock, desc: "E2EE information" },
+      { id: "encryption", label: "Encryption", icon: Lock, desc: "Key fingerprints & status" },
     ];
 
     return (

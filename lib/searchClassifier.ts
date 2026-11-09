@@ -51,9 +51,9 @@ const CREATIVE_DRAFTING_REGEX =
 const HISTORICAL_FACTS_REGEX =
   /\b(who\s+was\s+(george\s+washington|abraham\s+lincoln|julius\s+caesar|napoleon|albert\s+einstein|isaac\s+newton)|when\s+did\s+(world\s+war\s+(1|2|i|ii)\s+(start|end)|the\s+titanic\s+sink)|what\s+is\s+the\s+capital\s+of\s+(france|germany|japan|italy|canada|spain))\b/i;
 
-// Zline internal platform queries
+// Zline & Zino internal platform queries (answered directly by internal RAG knowledge base)
 const ZLINE_INTERNAL_REGEX =
-  /\b(how\s+does\s+zline|what\s+is\s+zline|zline\s+(encryption|e2ee|architecture)|how\s+do\s+i\s+use\s+zline)\b/i;
+  /\b(how\s+does\s+zline|what\s+is\s+zline|zline\s+(features|encryption|e2ee|architecture|settings|calls|github|repo|creator|developer)|how\s+do\s+i\s+(use\s+zline|link\s+device|pair\s+device|resize|change\s+theme)|who\s+(built|made|created|developed|owns)\s+(zline|zline\s+chat|zino)|who\s+is\s+(zino|sahil|muhammed\s+sahil|the\s+creator|the\s+author|the\s+developer)|what\s+is\s+zino|who\s+are\s+you|what\s+can\s+zino\s+do|zino\s+ai)\b/i;
 
 // High-confidence dynamic & temporal triggers
 const TEMPORAL_TRIGGERS_REGEX =

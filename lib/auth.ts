@@ -4,6 +4,7 @@ import GoogleProvider from "next-auth/providers/google";
 import bcrypt from "bcryptjs";
 import { connectDB } from "@/lib/db";
 import { User } from "@/lib/models/User";
+import { DevicePairing } from "@/lib/models/DevicePairing";
 import { normalizeEmail } from "@/lib/normalizeEmail";
 import crypto from "crypto";
 
@@ -161,6 +162,70 @@ export const authOptions: NextAuthOptions = {
               console.log(`[AUTH:email-otp] Added email-otp provider to user ${user._id}`);
             }
           }
+        }
+
+        return {
+          id: user._id.toString(),
+          name: user.name,
+          email: user.email,
+          image: user.image,
+        };
+      },
+    }),
+
+    // ─── Provider 4: Secure QR Device Pairing ───
+    CredentialsProvider({
+      id: "device-pairing",
+      name: "device-pairing",
+      credentials: {
+        pairingId: { label: "Pairing ID", type: "text" },
+        transferToken: { label: "Transfer Token", type: "text" },
+      },
+      async authorize(credentials) {
+        if (!credentials?.pairingId || !credentials?.transferToken) {
+          throw new Error("Missing pairing credentials");
+        }
+
+        const [tokenData, signature] = credentials.transferToken.split(".");
+        if (!tokenData || !signature) {
+          throw new Error("Invalid token format");
+        }
+
+        const [userId, deviceId, pairingId, timestampStr] = tokenData.split(":");
+        if (pairingId !== credentials.pairingId) {
+          throw new Error("Pairing identifier mismatch");
+        }
+
+        const timestamp = parseInt(timestampStr, 10);
+        if (isNaN(timestamp) || Date.now() - timestamp > 5 * 60 * 1000) {
+          throw new Error("Pairing token has expired");
+        }
+
+        const secret = process.env.NEXTAUTH_SECRET || "zline_e2ee_secret_key_v3";
+        const expectedSignature = crypto
+          .createHmac("sha256", secret)
+          .update(tokenData)
+          .digest("hex");
+
+        if (signature.length !== expectedSignature.length || !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature))) {
+          throw new Error("Cryptographic signature verification failed");
+        }
+
+        await connectDB();
+
+        const pairing = await DevicePairing.findOne({
+          pairingId,
+          targetDeviceId: deviceId,
+          status: "approved",
+        });
+
+        if (!pairing || !pairing.approvedByUserId || pairing.approvedByUserId.toString() !== userId) {
+          throw new Error("Pairing session is not approved by this user");
+        }
+
+        const user = await User.findById(userId);
+        if (!user || user.deleted) {
+          throw new Error("User account not found or deleted");
         }
 
         return {

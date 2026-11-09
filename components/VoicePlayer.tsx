@@ -20,6 +20,7 @@ export default function VoicePlayer({ src, duration, isMe = false }: VoicePlayer
   const [playing, setPlaying] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
   const [totalDuration, setTotalDuration] = useState(duration || 0);
+  const [playbackRate, setPlaybackRate] = useState<1 | 1.5 | 2>(1);
   const progressRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -30,6 +31,7 @@ export default function VoicePlayer({ src, duration, isMe = false }: VoicePlayer
       if (audio.duration && isFinite(audio.duration)) {
         setTotalDuration(audio.duration);
       }
+      audio.playbackRate = playbackRate;
     };
 
     const onTimeUpdate = () => {
@@ -50,7 +52,7 @@ export default function VoicePlayer({ src, duration, isMe = false }: VoicePlayer
       audio.removeEventListener("timeupdate", onTimeUpdate);
       audio.removeEventListener("ended", onEnded);
     };
-  }, []);
+  }, [playbackRate]);
 
   const togglePlay = useCallback(() => {
     const audio = audioRef.current;
@@ -59,10 +61,22 @@ export default function VoicePlayer({ src, duration, isMe = false }: VoicePlayer
       audio.pause();
       setPlaying(false);
     } else {
+      audio.playbackRate = playbackRate;
       audio.play();
       setPlaying(true);
     }
-  }, [playing]);
+  }, [playing, playbackRate]);
+
+  const cyclePlaybackRate = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    const rates: (1 | 1.5 | 2)[] = [1, 1.5, 2];
+    const nextIdx = (rates.indexOf(playbackRate) + 1) % rates.length;
+    const newRate = rates[nextIdx];
+    setPlaybackRate(newRate);
+    if (audioRef.current) {
+      audioRef.current.playbackRate = newRate;
+    }
+  };
 
   const handleSeek = (e: React.MouseEvent<HTMLDivElement>) => {
     const audio = audioRef.current;
@@ -84,7 +98,7 @@ export default function VoicePlayer({ src, duration, isMe = false }: VoicePlayer
   });
 
   return (
-    <div className="px-3 py-2.5 flex items-center gap-2.5 min-w-[200px]">
+    <div className="px-3 py-2.5 flex items-center gap-2.5 min-w-[210px]">
       <audio ref={audioRef} src={src} preload="metadata" />
 
       <button
@@ -122,16 +136,31 @@ export default function VoicePlayer({ src, duration, isMe = false }: VoicePlayer
           })}
         </div>
 
-        {/* Time */}
-        <p className={`text-[10px] mt-0.5 ${
-          isMe ? "text-blue-100" : "text-gray-400 dark:text-zinc-400"
-        }`}>
-          {playing || currentTime > 0
-            ? formatTime(currentTime)
-            : totalDuration > 0
-            ? formatTime(totalDuration)
-            : "0:00"}
-        </p>
+        {/* Time & Speed toggle */}
+        <div className="flex items-center justify-between mt-0.5">
+          <p className={`text-[10px] ${
+            isMe ? "text-blue-100" : "text-gray-400 dark:text-zinc-400"
+          }`}>
+            {playing || currentTime > 0
+              ? formatTime(currentTime)
+              : totalDuration > 0
+              ? formatTime(totalDuration)
+              : "0:00"}
+          </p>
+          <button
+            type="button"
+            onClick={cyclePlaybackRate}
+            className={`text-[9px] font-bold px-1.5 py-0.5 rounded-full transition-all cursor-pointer ${
+              isMe
+                ? "bg-white/20 hover:bg-white/30 text-white"
+                : "bg-gray-200 dark:bg-zinc-700 hover:bg-gray-300 dark:hover:bg-zinc-600 text-gray-700 dark:text-zinc-200"
+            }`}
+            title="Change voice playback speed"
+            aria-label={`Playback speed: ${playbackRate}x`}
+          >
+            {playbackRate}x
+          </button>
+        </div>
       </div>
     </div>
   );

@@ -4,9 +4,10 @@ import { signIn, useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { Sun, Moon } from "lucide-react";
+import { Sun, Moon, QrCode } from "lucide-react";
 import Logo from "@/components/Logo";
 import { useTheme } from "@/components/ThemeProvider";
+import DevicePairingModal from "@/components/DevicePairingModal";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -24,6 +25,7 @@ export default function LoginPage() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [googleLoading, setGoogleLoading] = useState(false);
+  const [showPairModal, setShowPairModal] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -208,6 +210,18 @@ export default function LoginPage() {
           </span>
         </div>
 
+        {/* Link Companion Device Button */}
+        <div className="pt-1">
+          <button
+            type="button"
+            onClick={() => setShowPairModal(true)}
+            className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-gray-300 dark:border-zinc-700 p-2.5 text-xs font-semibold text-gray-700 dark:text-zinc-300 hover:bg-gray-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+          >
+            <QrCode className="w-4 h-4 text-blue-600" />
+            <span>Link as Companion Device (QR Code)</span>
+          </button>
+        </div>
+
         <p className="text-center text-sm text-gray-500 dark:text-gray-400">
           Don't have an account?{" "}
           <Link
@@ -218,6 +232,12 @@ export default function LoginPage() {
           </Link>
         </p>
       </div>
+
+      <DevicePairingModal
+        isOpen={showPairModal}
+        onClose={() => setShowPairModal(false)}
+        isApprovingDevice={false}
+      />
     </div>
   );
 }

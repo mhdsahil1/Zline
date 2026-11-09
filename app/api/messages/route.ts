@@ -44,7 +44,14 @@ export async function GET(req: Request) {
       return NextResponse.json([], { status: 200 });
     }
 
-    const messages = await Message.find({ chat: chat._id })
+    const now = new Date();
+    const messages = await Message.find({
+      chat: chat._id,
+      $or: [
+        { expiresAt: { $exists: false } },
+        { expiresAt: { $gt: now } },
+      ],
+    })
       .populate("sender", "name image")
       .populate({
         path: "replyTo",
@@ -99,7 +106,24 @@ export async function POST(req: Request) {
     }
 
     const body = await req.json();
-    const { receiverId, chatId, content, type = "text", fileUrl, fileName, fileSize, isEncrypted, encAesKey, encAesKeyForSender, iv, replyTo, voiceDuration } = body;
+    const {
+      receiverId,
+      chatId,
+      content,
+      type = "text",
+      fileUrl,
+      fileName,
+      fileSize,
+      isEncrypted,
+      encAesKey,
+      encAesKeyForSender,
+      iv,
+      keyEnvelopes,
+      senderDeviceId,
+      cryptographicVersion,
+      replyTo,
+      voiceDuration,
+    } = body;
 
     if (!receiverId && !chatId) {
       return NextResponse.json(
@@ -187,8 +211,16 @@ export async function POST(req: Request) {
       }
     }
 
-    // Set expiry for media messages (1 day from now)
-    const expiresAt = type !== "text" ? new Date(Date.now() + MEDIA_EXPIRY_MS) : undefined;
+    // Disappearing Messages Retention Policy:
+    // Maximum retention: 7 days (604800s). Default: 7 days.
+    // User configurable per chat: 1 hour, 6 hours, 12 hours, 1 day, 3 days, 7 days.
+    const chatTimerSeconds = chat.disappearingTimer || (7 * 24 * 60 * 60);
+    const clampedRetention = Math.max(3600, Math.min(chatTimerSeconds, 7 * 24 * 60 * 60));
+
+    // Media messages expire at min(24h, clampedRetention) to protect storage
+    const mediaRetention = Math.min(clampedRetention, 24 * 60 * 60);
+    const effectiveRetentionSeconds = type !== "text" ? mediaRetention : clampedRetention;
+    const expiresAt = new Date(Date.now() + effectiveRetentionSeconds * 1000);
 
     const newMessage = await Message.create({
       chat: chat._id,
@@ -205,6 +237,9 @@ export async function POST(req: Request) {
       encAesKey,
       encAesKeyForSender,
       iv,
+      keyEnvelopes: keyEnvelopes && Array.isArray(keyEnvelopes) ? keyEnvelopes : undefined,
+      senderDeviceId,
+      cryptographicVersion: cryptographicVersion || (keyEnvelopes ? "3.0" : undefined),
     });
 
     const populatedMessage = await Message.findById(newMessage._id)

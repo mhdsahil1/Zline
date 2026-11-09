@@ -5,13 +5,13 @@ import { authOptions } from "@/lib/auth";
 import { checkIpRateLimit } from "@/lib/rateLimit";
 import { classifySearchIntent, SearchMode } from "@/lib/searchClassifier";
 import { executeResearch } from "@/lib/ai/researcher";
-import { buildNemotronPrompt, buildDeepSeekPrompt, buildMuseGlimmerPrompt } from "@/lib/ai/context-builder";
+import { buildZinoPrompt } from "@/lib/ai/context-builder";
 import { ResearchSource } from "@/lib/obscura";
 
 const apiKey =
   process.env.NVIDIA_API_KEY ||
   process.env.DEEPSEEK_API_KEY ||
-  "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";
+  "";
 const baseURL =
   process.env.NVIDIA_BASE_URL ||
   process.env.DEEPSEEK_BASE_URL ||
@@ -22,7 +22,7 @@ const model =
   "nvidia/nemotron-3.5-bolt-e4b";
 
 const openai = new OpenAI({
-  apiKey,
+  apiKey: apiKey || "dummy-key-for-build",
   baseURL,
 });
 
@@ -31,8 +31,15 @@ export async function POST(req: Request) {
     const session = await getServerSession(authOptions);
     if (!session?.user) {
       return NextResponse.json(
-        { message: "Authentication required to chat with Zline AI." },
+        { message: "Authentication required to chat with Zino." },
         { status: 401 }
+      );
+    }
+
+    if (!apiKey) {
+      return NextResponse.json(
+        { message: "AI Assistant is not configured. Please set NVIDIA_API_KEY in .env." },
+        { status: 503 }
       );
     }
 
@@ -116,7 +123,7 @@ export async function POST(req: Request) {
 
             sendEvent("status", { stage: "generating" });
 
-            const finalMessages = buildNemotronPrompt(
+            const finalMessages = buildZinoPrompt(
               userPrompt,
               recentMessages,
               sources,
@@ -188,7 +195,7 @@ export async function POST(req: Request) {
       }
     }
 
-    const finalMessages = buildNemotronPrompt(
+    const finalMessages = buildZinoPrompt(
       userPrompt,
       recentMessages,
       sources,

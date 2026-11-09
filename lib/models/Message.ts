@@ -21,6 +21,13 @@ export interface IPoll {
   isEnded: boolean;
 }
 
+export interface IKeyEnvelope {
+  deviceId: string;
+  userId?: mongoose.Types.ObjectId;
+  algorithm: string;
+  encryptedKey: string;
+}
+
 export interface IMessage extends Document {
   chat: mongoose.Types.ObjectId;
   sender: mongoose.Types.ObjectId;
@@ -42,6 +49,9 @@ export interface IMessage extends Document {
   encAesKey?: string;
   encAesKeyForSender?: string;
   iv?: string;
+  keyEnvelopes?: IKeyEnvelope[];
+  senderDeviceId?: string;
+  cryptographicVersion?: string;
   expiresAt?: Date;
   createdAt: Date;
   updatedAt: Date;
@@ -80,6 +90,16 @@ const pollSchema = new Schema<IPoll>(
   { _id: false }
 );
 
+const keyEnvelopeSchema = new Schema<IKeyEnvelope>(
+  {
+    deviceId: { type: String, required: true },
+    userId: { type: Schema.Types.ObjectId, ref: "User" },
+    algorithm: { type: String, default: "RSA-OAEP-256" },
+    encryptedKey: { type: String, required: true },
+  },
+  { _id: false }
+);
+
 const messageSchema = new Schema<IMessage>(
   {
     chat: { type: Schema.Types.ObjectId, ref: "Chat", required: true },
@@ -110,6 +130,9 @@ const messageSchema = new Schema<IMessage>(
     encAesKey: { type: String },
     encAesKeyForSender: { type: String },
     iv: { type: String },
+    keyEnvelopes: [keyEnvelopeSchema],
+    senderDeviceId: { type: String },
+    cryptographicVersion: { type: String, default: "3.0" },
     // TTL index: MongoDB auto-deletes the document when expiresAt is reached.
     // Only set on media messages (image, file, voice). Text/poll messages never expire.
     expiresAt: { type: Date, index: { expires: 0 } },

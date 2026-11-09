@@ -71,6 +71,7 @@ export async function GET() {
         otherUser: !chat.isGroup ? otherUsers[0] : null,
         latestMessage: chat.latestMessage,
         unreadCount: unreadMap.get(chat._id.toString()) || 0,
+        disappearingTimer: chat.disappearingTimer || 7 * 24 * 60 * 60,
         updatedAt: chat.updatedAt,
       };
     });
@@ -82,5 +83,38 @@ export async function GET() {
       { message: "Internal server error" },
       { status: 500 }
     );
+  }
+}
+
+export async function PATCH(req: Request) {
+  try {
+    const session = await getServerSession(authOptions);
+    if (!session?.user?.id) {
+      return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
+    }
+
+    const body = await req.json();
+    const { chatId, disappearingTimer } = body;
+
+    if (!chatId || typeof disappearingTimer !== "number") {
+      return NextResponse.json({ message: "Invalid payload: chatId and disappearingTimer required" }, { status: 400 });
+    }
+
+    // Clamp timer: minimum 1 hour (3600s), maximum 7 days (604800s)
+    const validTimer = Math.max(3600, Math.min(disappearingTimer, 7 * 24 * 60 * 60));
+
+    await connectDB();
+    const chat = await Chat.findOne({ _id: chatId, users: session.user.id });
+    if (!chat) {
+      return NextResponse.json({ message: "Chat not found" }, { status: 404 });
+    }
+
+    chat.disappearingTimer = validTimer;
+    await chat.save();
+
+    return NextResponse.json({ success: true, disappearingTimer: validTimer }, { status: 200 });
+  } catch (error) {
+    console.error("Failed to update chat timer:", error);
+    return NextResponse.json({ message: "Internal server error" }, { status: 500 });
   }
 }

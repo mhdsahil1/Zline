@@ -1,6 +1,8 @@
 import { NextResponse } from "next/dist/server/web/spec-extension/response";
 import { connectDB } from "@/lib/db";
 import { UserKey } from "@/lib/models/UserKey";
+import { Device } from "@/lib/models/Device";
+import { computeFingerprint } from "@/lib/crypto";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 
@@ -58,7 +60,23 @@ export async function POST(req: Request) {
       { upsert: true, new: true }
     );
 
-    return NextResponse.json({ success: true }, { status: 200 });
+    // Sync into Device collection if no active device exists for this key
+    const fingerprint = await computeFingerprint(publicKey);
+    const existingDevice = await Device.findOne({ userId: session.user.id, isRevoked: false });
+    if (!existingDevice) {
+      await Device.create({
+        userId: session.user.id,
+        deviceId: `dev_primary_${session.user.id}`,
+        deviceName: "Primary Device",
+        deviceType: "browser",
+        publicKey,
+        fingerprint,
+        isVerified: true,
+        lastActiveAt: new Date(),
+      });
+    }
+
+    return NextResponse.json({ success: true, fingerprint }, { status: 200 });
   } catch (error) {
     console.error("Failed to save public key:", error);
     return NextResponse.json(

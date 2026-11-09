@@ -5,18 +5,26 @@ import { useRouter } from "next/navigation";
 import { useEffect, useState, useRef, useCallback, Fragment } from "react";
 import { useSocket } from "@/components/SocketProvider";
 import {
-  MessageCircle, LogOut, Send, Loader2, Check, CheckCheck,
-  Search, ArrowLeft, Plus, X, Paperclip, Mic, StopCircle, Download, FileText,
+  MessageCircle, Send, Loader2, Check, CheckCheck,
+  Search, ArrowLeft, Plus, X, Paperclip, Download, FileText,
   Phone, Video, BarChart2, ChevronRight, CheckCircle2, SmilePlus,
   Image as ImageIcon, Music, Film, Code2, Archive, File, Users,
   PhoneCall, PhoneMissed, PhoneIncoming, PhoneOutgoing, MessageSquare,
-  Pin, Star, Settings, User, UserX, Sun, Moon, Sparkles, RotateCcw, Bot, Globe, Compass, Cpu, Brain
+  Pin, Star, Settings, User, UserX, RotateCcw, Globe,
+  SlidersHorizontal, Type, Columns, Clock, Sparkles, Languages, Copy
 } from "lucide-react";
 import { format, isToday, isYesterday, formatDistanceToNow } from "date-fns";
 import CallModal from "@/components/CallModal";
 import GroupCallModal from "@/components/GroupCallModal";
 import Logo from "@/components/Logo";
-import { generateE2EKeypair, exportKeyToJwk, encryptMessage, decryptMessage } from "@/lib/crypto";
+import {
+  getOrCreateLocalDevice,
+  getStoredLocalDevice,
+  encryptMultiRecipientMessage,
+  decryptMultiRecipientMessage,
+  type LocalDeviceIdentity,
+  type RecipientDeviceTarget,
+} from "@/lib/crypto";
 
 // Import custom components for the 7 features
 import MessageActions from "@/components/MessageActions";
@@ -34,6 +42,7 @@ import ProfileDropdown, { type AccountTheme } from "@/components/ProfileDropdown
 import { useTheme } from "@/components/ThemeProvider";
 import LoadingAnimation, { OrbLoading } from "@/components/LoadingAnimation";
 import AiIcon from "@/components/AiIcon";
+import LinkPreviewCard from "@/components/LinkPreviewCard";
 
 function formatChatTime(date: string | Date) {
   const d = new Date(date);
@@ -56,12 +65,77 @@ function urlBase64ToUint8Array(base64String: string) {
 }
 
 const AI_CHAT_ID = "zline_ai_assistant";
+const MAX_TOTAL_FILES_BYTES = 50 * 1024 * 1024; // 50MB per selection limit
 
-function FormattedAiContent({ content }: { content: string }) {
+interface PendingAttachment {
+  id: string;
+  file: File;
+  previewUrl: string | null;
+}
+
+const TIMER_OPTIONS = [
+  { label: "1 hour", seconds: 3600, short: "1h", description: "Quick ephemeral chats" },
+  { label: "6 hours", seconds: 21600, short: "6h", description: "Half-day retention" },
+  { label: "12 hours", seconds: 43200, short: "12h", description: "Same-day retention" },
+  { label: "24 hours (1 day)", seconds: 86400, short: "24h", description: "Daily clean sweep" },
+  { label: "3 days", seconds: 259200, short: "3d", description: "Short-term storage" },
+  { label: "7 days (Max retention)", seconds: 604800, short: "7d", description: "Default maximum storage lifecycle" },
+];
+
+function formatTimerLabel(seconds?: number) {
+  if (!seconds || seconds >= 604800) return "7d";
+  if (seconds >= 259200) return "3d";
+  if (seconds >= 86400) return "24h";
+  if (seconds >= 43200) return "12h";
+  if (seconds >= 21600) return "6h";
+  if (seconds >= 3600) return "1h";
+  return `${Math.round(seconds / 3600)}h`;
+}
+
+function getFirstUrl(text?: string | null): string | null {
+  if (!text) return null;
+  const match = text.match(/(https?:\/\/[^\s]+)/);
+  return match ? match[1] : null;
+}
+
+function renderTextWithLinks(text: string, isMe: boolean) {
+  const urlRegex = /(https?:\/\/[^\s]+)/g;
+  const parts = text.split(urlRegex);
+  return parts.map((part, index) => {
+    if (/^https?:\/\//.test(part)) {
+      return (
+        <a
+          key={index}
+          href={part}
+          target="_blank"
+          rel="noopener noreferrer"
+          onClick={(e) => e.stopPropagation()}
+          className={`underline break-all font-medium transition-colors ${
+            isMe
+              ? "text-blue-100 hover:text-white decoration-blue-200"
+              : "text-blue-600 dark:text-blue-400 hover:underline decoration-blue-400"
+          }`}
+        >
+          {part}
+        </a>
+      );
+    }
+    return part;
+  });
+}
+
+function FormattedAiContent({ content, fontSize = "md" }: { content: string; fontSize?: "sm" | "md" | "lg" | "xl" }) {
   const parts = content.split(/(```[\s\S]*?```)/g);
 
+  const sizeClasses = {
+    sm: "text-xs space-y-1.5",
+    md: "text-sm space-y-2",
+    lg: "text-base space-y-2.5",
+    xl: "text-lg space-y-3",
+  }[fontSize] || "text-sm space-y-2";
+
   return (
-    <div className="text-sm space-y-2 leading-relaxed break-words min-w-0">
+    <div className={`${sizeClasses} leading-relaxed break-words min-w-0`}>
       {parts.map((part, idx) => {
         if (part.startsWith("```") && part.endsWith("```")) {
           const firstLineEnd = part.indexOf("\n");
@@ -122,9 +196,9 @@ function FormattedAiContent({ content }: { content: string }) {
 
 export default function ChatPage() {
   const { data: session, status } = useSession();
-  const { theme, resolvedTheme, toggleTheme, setTheme } = useTheme();
+  const { theme, resolvedTheme, setTheme } = useTheme();
   const router = useRouter();
-  const { socket, isConnected } = useSocket();
+  const { socket } = useSocket();
 
   // Register Service Worker and subscribe to Push notifications
   useEffect(() => {
@@ -196,11 +270,8 @@ export default function ChatPage() {
 
   // Media & voice state
   const [isUploading, setIsUploading] = useState(false);
-  const [isRecording, setIsRecording] = useState(false);
   const [mediaError, setMediaError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const audioChunksRef = useRef<Blob[]>([]);
 
   // Poll state
   const [showPollForm, setShowPollForm] = useState(false);
@@ -222,11 +293,10 @@ export default function ChatPage() {
   // Reaction state
   const [activeReactionMsgId, setActiveReactionMsgId] = useState<string | null>(null);
 
-  // File sharing enhanced states
-  const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+  // File sharing enhanced states (multiple files, max 50MB per selection)
+  const [uploadProgress, setUploadProgress] = useState<{ current: number; total: number; percent: number } | null>(null);
   const [isDragging, setIsDragging] = useState(false);
-  const [pendingFile, setPendingFile] = useState<File | null>(null);
-  const [pendingFilePreview, setPendingFilePreview] = useState<string | null>(null);
+  const [pendingFiles, setPendingFiles] = useState<PendingAttachment[]>([]);
 
   // Group creation states
   const [showCreateGroupModal, setShowCreateGroupModal] = useState(false);
@@ -237,6 +307,8 @@ export default function ChatPage() {
 
   // E2EE States
   const [recipientPublicKey, setRecipientPublicKey] = useState<string | null>(null);
+  const [localDevice, setLocalDevice] = useState<LocalDeviceIdentity | null>(null);
+  const [targetRecipientDevices, setTargetRecipientDevices] = useState<RecipientDeviceTarget[]>([]);
 
   // New features states
   const [replyingTo, setReplyingTo] = useState<any | null>(null);
@@ -247,12 +319,128 @@ export default function ChatPage() {
   const [showSettingsPanel, setShowSettingsPanel] = useState(false);
   const [starredMessageIds, setStarredMessageIds] = useState<string[]>([]);
   const [blockedUsers, setBlockedUsers] = useState<string[]>([]);
-  const [userSettings, setUserSettings] = useState<any>(null);
+
+  // Disappearing messages & chat export states
+  const [showTimerModal, setShowTimerModal] = useState(false);
+  const [timerLoading, setTimerLoading] = useState(false);
+
+  // Catch Me Up AI briefing states
+  const [showCatchMeUpModal, setShowCatchMeUpModal] = useState(false);
+  const [catchMeUpLoading, setCatchMeUpLoading] = useState(false);
+  const [catchMeUpSummary, setCatchMeUpSummary] = useState<string>("");
+  const [catchMeUpCopied, setCatchMeUpCopied] = useState(false);
+
+  // Inline translation state
+  const [translatedMessages, setTranslatedMessages] = useState<Record<string, { text: string; loading?: boolean; error?: string }>>({});
+
+  // Layout & Sizing customization (Chat Size & Chat List Size)
+  const [sidebarWidth, setSidebarWidth] = useState<number>(() => {
+    if (typeof window !== "undefined") {
+      const savedWidth = localStorage.getItem("zline_sidebar_width");
+      if (savedWidth) {
+        const parsed = parseInt(savedWidth, 10);
+        if (!isNaN(parsed) && parsed >= 260 && parsed <= 650) {
+          return parsed;
+        }
+      }
+    }
+    return 360;
+  });
+  const [isResizing, setIsResizing] = useState(false);
+  const isResizingRef = useRef(false);
+  const [chatFontSize, setChatFontSize] = useState<"sm" | "md" | "lg" | "xl">(() => {
+    if (typeof window !== "undefined") {
+      const savedFontSize = localStorage.getItem("zline_chat_font_size") as "sm" | "md" | "lg" | "xl" | null;
+      if (savedFontSize && ["sm", "md", "lg", "xl"].includes(savedFontSize)) {
+        return savedFontSize;
+      }
+    }
+    return "md";
+  });
+  const [chatListDensity, setChatListDensity] = useState<"compact" | "normal" | "spacious">(() => {
+    if (typeof window !== "undefined") {
+      const savedDensity = localStorage.getItem("zline_chat_list_density") as "compact" | "normal" | "spacious" | null;
+      if (savedDensity && ["compact", "normal", "spacious"].includes(savedDensity)) {
+        return savedDensity;
+      }
+    }
+    return "normal";
+  });
+  const [showSizeControls, setShowSizeControls] = useState(false);
+  const [isDesktop, setIsDesktop] = useState(true);
+
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const check = () => setIsDesktop(window.innerWidth >= 768);
+      check();
+      window.addEventListener("resize", check);
+      return () => window.removeEventListener("resize", check);
+    }
+  }, []);
+
+  // Sync size changes from Settings or other components
+  useEffect(() => {
+    const handleSizeChanged = (e: any) => {
+      if (e?.detail?.fontSize) setChatFontSize(e.detail.fontSize);
+      if (e?.detail?.density) setChatListDensity(e.detail.density);
+      if (e?.detail?.sidebarWidth) setSidebarWidth(e.detail.sidebarWidth);
+    };
+    window.addEventListener("zline:chat_size_changed", handleSizeChanged);
+    return () => window.removeEventListener("zline:chat_size_changed", handleSizeChanged);
+  }, []);
+
+  // Draggable sidebar resizing logic
+  const startResizing = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+    isResizingRef.current = true;
+    document.body.style.cursor = "col-resize";
+    document.body.style.userSelect = "none";
+  }, []);
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isResizingRef.current) return;
+      const maxAllowed = Math.min(window.innerWidth * 0.55, 620);
+      const newWidth = Math.min(Math.max(e.clientX, 260), maxAllowed);
+      setSidebarWidth(newWidth);
+    };
+
+    const handleMouseUp = () => {
+      if (isResizingRef.current) {
+        isResizingRef.current = false;
+        setIsResizing(false);
+        document.body.style.cursor = "";
+        document.body.style.userSelect = "";
+        setSidebarWidth((w) => {
+          try {
+            localStorage.setItem("zline_sidebar_width", w.toString());
+          } catch {}
+          return w;
+        });
+      }
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, []);
 
   // Zline AI Assistant states
   const [isAiThinking, setIsAiThinking] = useState(false);
   const [aiLatestMessage, setAiLatestMessage] = useState<{ content: string; createdAt: string } | null>(null);
-  const [aiSearchMode, setAiSearchMode] = useState<"auto" | "always" | "off">("auto");
+  const [aiSearchMode, setAiSearchMode] = useState<"auto" | "always" | "off">(() => {
+    if (typeof window !== "undefined") {
+      const savedMode = localStorage.getItem("zline_ai_search_mode") as "auto" | "always" | "off" | null;
+      if (savedMode === "auto" || savedMode === "always" || savedMode === "off") {
+        return savedMode;
+      }
+    }
+    return "auto";
+  });
   const [aiSearchStatus, setAiSearchStatus] = useState<{
     stage: "idle" | "searching" | "finding" | "browsing" | "extracting" | "analyzing" | "reasoning" | "generating";
     query?: string;
@@ -261,97 +449,124 @@ export default function ChatPage() {
     siteName?: string;
   }>({ stage: "idle" });
 
-  // Load saved AI search mode preference
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      const savedMode = localStorage.getItem("zline_ai_search_mode") as "auto" | "always" | "off" | null;
-      if (savedMode === "auto" || savedMode === "always" || savedMode === "off") {
-        setAiSearchMode(savedMode);
-      }
-    }
-  }, []);
-
   // Refs for message elements for scrolling
   const messageRefs = useRef<Record<string, HTMLDivElement | null>>({});
 
-  // Load or generate E2EE keys
+  // Load or generate E2EE keys (v3.0 Multi-Device Identity)
   useEffect(() => {
     if (status !== "authenticated" || !session?.user?.id) return;
 
     const setupE2EKeys = async () => {
       try {
-        const userPrivKeyName = `zline_e2e_private_key_${session.user.id}`;
-        const userPubKeyName = `zline_e2e_public_key_${session.user.id}`;
+        const dev = await getOrCreateLocalDevice(session.user.id);
+        setLocalDevice(dev);
 
-        let privateKeyJwk = localStorage.getItem(userPrivKeyName);
-        let publicKeyJwk = localStorage.getItem(userPubKeyName);
+        // Register device with /api/devices
+        await fetch("/api/devices", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            deviceId: dev.deviceId,
+            deviceName: dev.deviceName,
+            deviceType: dev.deviceType,
+            publicKey: dev.publicKeyJwk,
+            fingerprint: dev.fingerprint,
+          }),
+        });
 
-        // Fallback to legacy non-user-specific keys
-        if (!privateKeyJwk || !publicKeyJwk) {
-          const legacyPriv = localStorage.getItem("zline_e2e_private_key");
-          const legacyPub = localStorage.getItem("zline_e2e_public_key");
-          if (legacyPriv && legacyPub) {
-            privateKeyJwk = legacyPriv;
-            publicKeyJwk = legacyPub;
-            localStorage.setItem(userPrivKeyName, privateKeyJwk);
-            localStorage.setItem(userPubKeyName, publicKeyJwk);
-            localStorage.removeItem("zline_e2e_private_key");
-            localStorage.removeItem("zline_e2e_public_key");
-          }
-        }
-
-        if (!privateKeyJwk || !publicKeyJwk) {
-          console.log("Generating new E2EE keys...");
-          const keypair = await generateE2EKeypair();
-          privateKeyJwk = await exportKeyToJwk(keypair.privateKey);
-          publicKeyJwk = await exportKeyToJwk(keypair.publicKey);
-          localStorage.setItem(userPrivKeyName, privateKeyJwk);
-          localStorage.setItem(userPubKeyName, publicKeyJwk);
-        }
-
-        // Upload to server
+        // Sync legacy /api/keys for backwards compatibility
         await fetch("/api/keys", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ publicKey: publicKeyJwk }),
+          body: JSON.stringify({ publicKey: dev.publicKeyJwk }),
         });
-        console.log("E2EE public key verified and updated on server");
+
+        if (socket && socket.connected) {
+          socket.emit("join_device", { deviceId: dev.deviceId, userId: session.user.id });
+        }
+        console.log("Zline v3.0 device initialized:", dev.deviceId, dev.fingerprint);
       } catch (err) {
-        console.error("Failed to setup E2EE keys:", err);
+        console.error("Failed to setup E2EE device keys:", err);
       }
     };
 
     setupE2EKeys();
-  }, [status, session?.user?.id]);
+  }, [status, session?.user?.id, socket]);
 
-  // Fetch recipient public key when selected chat changes
+  // Fetch active device public keys for all recipients when selected chat changes
   useEffect(() => {
     if (selectedChat?.isAi) {
       setRecipientPublicKey(null);
+      setTargetRecipientDevices([]);
       return;
     }
-    if (selectedChat && !selectedChat.isGroup && selectedChat.otherUser?._id) {
+
+    if (!selectedChat || !session?.user?.id) {
       setRecipientPublicKey(null);
-      fetch(`/api/keys?userId=${selectedChat.otherUser._id}`)
-        .then((res) => {
-          if (res.ok) return res.json();
-          return null;
-        })
-        .then((data) => {
-          if (data?.publicKey) {
-            setRecipientPublicKey(data.publicKey);
-          }
-        })
-        .catch((err) => console.error("Error fetching public key:", err));
-    } else {
-      setRecipientPublicKey(null);
+      setTargetRecipientDevices([]);
+      return;
     }
-  }, [selectedChat?._id, selectedChat?.isGroup, selectedChat?.otherUser?._id, selectedChat?.isAi]);
+
+    // Determine target user IDs
+    let targetUserIds: string[] = [];
+    if (selectedChat.isGroup && Array.isArray(selectedChat.users)) {
+      targetUserIds = selectedChat.users
+        .map((u: any) => (typeof u === "object" ? u._id : u))
+        .filter((uid: string) => uid && uid !== session.user.id);
+    } else if (selectedChat.otherUser?._id) {
+      targetUserIds = [selectedChat.otherUser._id];
+    }
+
+    if (targetUserIds.length === 0) {
+      setRecipientPublicKey(null);
+      setTargetRecipientDevices([]);
+      return;
+    }
+
+    fetch(`/api/devices/keys?userIds=${targetUserIds.join(",")}`)
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.devices && Array.isArray(data.devices)) {
+          const currentDevId = localDevice?.deviceId;
+          // Filter to only other devices (not current sender device)
+          const validTargets: RecipientDeviceTarget[] = data.devices
+            .filter((d: any) => d.deviceId !== currentDevId)
+            .map((d: any) => ({
+              deviceId: d.deviceId,
+              userId: typeof d.userId === "object" ? d.userId._id || d.userId : d.userId,
+              publicKey: d.publicKey,
+            }));
+          setTargetRecipientDevices(validTargets);
+
+          // For backwards compatibility indicator
+          const firstOther = validTargets.find((d) => d.userId !== session.user.id);
+          setRecipientPublicKey(firstOther?.publicKey || null);
+        }
+      })
+      .catch((err) => console.error("Error fetching device public keys:", err));
+  }, [
+    selectedChat,
+    session?.user?.id,
+    localDevice?.deviceId,
+  ]);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const messagesContainerRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const searchTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Scroll to bottom helper — declared early so it is accessible across all effects & handlers
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
+    // Scroll the messages container vertically directly to avoid any document-level horizontal shift
+    if (messagesContainerRef.current) {
+      messagesContainerRef.current.scrollTo({
+        top: messagesContainerRef.current.scrollHeight,
+        behavior,
+      });
+    } else if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior, block: "end", inline: "nearest" });
+    }
+  }, []);
 
   // Refs to always have the latest values inside stable socket listeners
   const selectedChatRef = useRef<any>(null);
@@ -378,11 +593,8 @@ export default function ChatPage() {
           return null;
         })
         .then((data) => {
-          if (data?.settings) {
-            setUserSettings(data.settings);
-            if (data.settings.theme) {
-              setTheme(data.settings.theme);
-            }
+          if (data?.settings?.theme) {
+            setTheme(data.settings.theme);
           }
         })
         .catch((err) => console.error("Error fetching settings:", err));
@@ -411,7 +623,7 @@ export default function ChatPage() {
         })
         .catch((err) => console.error("Error fetching starred messages:", err));
     }
-  }, [status, session?.user?.id]);
+  }, [status, session?.user?.id, setTheme]);
 
   // Scroll to a specific message and flash highlight it
   const handleScrollToMessage = useCallback((messageId: string) => {
@@ -425,39 +637,50 @@ export default function ChatPage() {
     }
   }, []);
 
-  // Decrypts an array of messages using our private key
+  // Decrypts an array of messages using v3.0 Multi-Device E2EE
   const decryptMessagesArray = useCallback(async (msgs: any[]) => {
     if (typeof window === "undefined") return msgs;
     if (!session?.user?.id) return msgs;
-    const myPrivateKey = localStorage.getItem(`zline_e2e_private_key_${session.user.id}`);
-    if (!myPrivateKey) return msgs;
+
+    let device = localDevice;
+    if (!device) {
+      device = await getStoredLocalDevice(session.user.id);
+      if (device) setLocalDevice(device);
+    }
+    if (!device) return msgs;
 
     return await Promise.all(
       msgs.map(async (m) => {
         if (m.isEncrypted && m.iv) {
           try {
-            // Check if current user is the sender (sender can be populated object or just ID string)
             const senderId = typeof m.sender === "object" && m.sender !== null ? m.sender._id : m.sender;
             const isSender = senderId === session.user.id;
-            
-            // For sender, use encAesKeyForSender (fallback to encAesKey if not present)
-            const aesKeyToDecrypt = isSender ? (m.encAesKeyForSender || m.encAesKey) : m.encAesKey;
 
-            if (!aesKeyToDecrypt) {
-              throw new Error("No AES key found for decryption");
-            }
-
-            const plaintext = await decryptMessage(m.content, aesKeyToDecrypt, m.iv, myPrivateKey);
+            const plaintext = await decryptMultiRecipientMessage(
+              m.content,
+              m.iv,
+              m.keyEnvelopes,
+              device.deviceId,
+              device.privateKeyJwk,
+              {
+                encAesKey: m.encAesKey,
+                encAesKeyForSender: m.encAesKeyForSender,
+                isSender,
+              }
+            );
             return { ...m, content: plaintext };
-          } catch (err) {
-            console.error("Failed to decrypt message:", m._id, err);
+          } catch (err: any) {
+            console.error("Failed to decrypt message:", m._id, err?.code || err);
+            if (err?.code === "NO_ENVELOPE_FOR_DEVICE") {
+              return { ...m, content: "🔒 Message encrypted for other devices" };
+            }
             return { ...m, content: "🔒 Decryption failed" };
           }
         }
         return m;
       })
     );
-  }, [session?.user?.id]);
+  }, [session?.user?.id, localDevice]);
 
   // Fetch recent chats
   const fetchChats = useCallback(async () => {
@@ -487,7 +710,7 @@ export default function ChatPage() {
 
         setChats(data);
       }
-    } catch (error) {
+    } catch {
       console.error("Failed to fetch chats");
     }
   }, [decryptMessagesArray]);
@@ -506,8 +729,8 @@ export default function ChatPage() {
       if (res.ok) {
         setCalls(await res.json());
       }
-    } catch (error) {
-      console.error("Failed to fetch calls", error);
+    } catch {
+      console.error("Failed to fetch calls");
     }
   }, []);
 
@@ -530,7 +753,7 @@ export default function ChatPage() {
       try {
         const res = await fetch(`/api/search?q=${encodeURIComponent(value)}`);
         if (res.ok) setSearchResults(await res.json());
-      } catch (e) { console.error("Search failed"); }
+      } catch { console.error("Search failed"); }
       setSearchLoading(false);
     }, 300);
   };
@@ -583,8 +806,6 @@ export default function ChatPage() {
     }
   };
 
-
-
   // Fetch messages for selected chat
   const fetchMessages = useCallback(async (receiverId: string | null, chatId?: string | null) => {
     if (receiverId === AI_CHAT_ID || chatId === AI_CHAT_ID) return;
@@ -615,8 +836,8 @@ export default function ChatPage() {
           })
         );
       }
-    } catch (error) { console.error("Failed to fetch messages"); }
-  }, [socket, session, decryptMessagesArray]);
+    } catch { console.error("Failed to fetch messages"); }
+  }, [socket, session, decryptMessagesArray, scrollToBottom]);
 
   useEffect(() => {
     if (selectedChat?.isAi) return;
@@ -670,8 +891,8 @@ export default function ChatPage() {
     const initial = [
       {
         _id: "welcome_ai_msg",
-        content: "👋 Hello! I am **Zline AI**, your built-in intelligent assistant powered by NVIDIA Nemotron.\n\nAsk me anything: reasoning puzzles (such as *which number is larger, 9.11 or 9.8?*), coding & debugging, real-time web research, or how Zline's end-to-end encryption works!",
-        sender: { _id: AI_CHAT_ID, name: "Zline AI" },
+        content: "👋 Hello! I am **Zino**, your built-in intelligent assistant in Zline.\n\nAsk me anything: how Zline features and v3.0 end-to-end encryption work, how to link devices, reasoning puzzles, coding & debugging, or real-time web research!",
+        sender: { _id: AI_CHAT_ID, name: "Zino" },
         createdAt: new Date().toISOString(),
         type: "text",
         isAi: true,
@@ -679,7 +900,7 @@ export default function ChatPage() {
     ];
     setMessages(initial);
     scrollToBottom();
-  }, [selectedChat?.isAi, session?.user?.id]);
+  }, [selectedChat?.isAi, session?.user?.id, scrollToBottom]);
 
   // Open Zline AI conversation
   const openAiChat = useCallback(() => {
@@ -687,12 +908,12 @@ export default function ChatPage() {
       _id: AI_CHAT_ID,
       isGroup: false,
       isAi: true,
-      chatName: "Zline AI",
+      chatName: "Zino",
       chatInitial: "AI",
       isOnline: true,
       otherUser: {
         _id: AI_CHAT_ID,
-        name: "Zline AI",
+        name: "Zino",
         email: "ai@zline.app",
         image: "/ai-platform.svg",
       },
@@ -711,8 +932,8 @@ export default function ChatPage() {
     const initial = [
       {
         _id: "welcome_ai_msg",
-        content: "👋 Hello! I am **Zline AI**, your built-in intelligent assistant powered by NVIDIA Nemotron.\n\nAsk me anything: reasoning puzzles (such as *which number is larger, 9.11 or 9.8?*), coding & debugging, real-time web research, or how Zline's end-to-end encryption works!",
-        sender: { _id: AI_CHAT_ID, name: "Zline AI" },
+        content: "👋 Hello! I am **Zino**, your built-in intelligent assistant in Zline.\n\nAsk me anything: how Zline features and v3.0 end-to-end encryption work, how to link devices, reasoning puzzles, coding & debugging, or real-time web research!",
+        sender: { _id: AI_CHAT_ID, name: "Zino" },
         createdAt: new Date().toISOString(),
         type: "text",
         isAi: true,
@@ -727,18 +948,23 @@ export default function ChatPage() {
 
   useEffect(() => {
     return () => {
-      if (pendingFilePreview) {
-        URL.revokeObjectURL(pendingFilePreview);
-      }
+      pendingFiles.forEach((p) => {
+        if (p.previewUrl) {
+          URL.revokeObjectURL(p.previewUrl);
+        }
+      });
     };
-  }, [pendingFilePreview]);
+  }, [pendingFiles]);
 
   useEffect(() => {
-    if (pendingFilePreview) {
-      URL.revokeObjectURL(pendingFilePreview);
-      setPendingFilePreview(null);
-    }
-    setPendingFile(null);
+    setPendingFiles((prev) => {
+      prev.forEach((p) => {
+        if (p.previewUrl) {
+          URL.revokeObjectURL(p.previewUrl);
+        }
+      });
+      return [];
+    });
   }, [selectedChat?.otherUser?._id, selectedChat?._id]);
 
   // Socket listeners — registered once per socket instance.
@@ -749,7 +975,9 @@ export default function ChatPage() {
     const handleReceiveMessage = async (message: any) => {
       const currentChat = selectedChatRef.current;
       const currentSession = sessionRef.current;
-      const otherUserId = currentChat?.otherUser?._id;
+      const currentUserId = String(currentSession?.user?.id || "");
+      const currentChatId = String(currentChat?._id || "");
+      const otherUserId = String(currentChat?.otherUser?._id || "");
 
       let decryptedMsg = message;
       if (message.isEncrypted) {
@@ -757,75 +985,149 @@ export default function ChatPage() {
         decryptedMsg = decryptedArr[0];
       }
 
-      if (otherUserId && (decryptedMsg.sender === otherUserId || decryptedMsg.sender === currentSession?.user?.id)) {
-        if (decryptedMsg.sender === otherUserId) {
+      // Normalize senderId: handle both populated object ({ _id, name, ... }) and string ID
+      const senderId =
+        typeof decryptedMsg.sender === "object" && decryptedMsg.sender !== null
+          ? String(decryptedMsg.sender._id || decryptedMsg.sender.id || "")
+          : String(decryptedMsg.sender || "");
+
+      // Normalize messageChatId: handle both populated object ({ _id, ... }) and string ID
+      const messageChatId =
+        typeof decryptedMsg.chat === "object" && decryptedMsg.chat !== null
+          ? String(decryptedMsg.chat._id || decryptedMsg.chat.id || "")
+          : String(decryptedMsg.chat || "");
+
+      // Determine if message belongs to the currently active conversation
+      const isCurrentChat = Boolean(
+        currentChat && (
+          (currentChatId && messageChatId && currentChatId === messageChatId) ||
+          (!currentChat.isGroup && otherUserId && senderId === otherUserId)
+        )
+      );
+
+      if (isCurrentChat) {
+        // Prevent duplicate messages in active chat state
+        setMessages((prev) => {
+          if (prev.some((m) => String(m._id) === String(decryptedMsg._id))) {
+            return prev;
+          }
+          return [...prev, decryptedMsg];
+        });
+        scrollToBottom();
+
+        // If message is from someone else, mark it as seen immediately
+        if (senderId && senderId !== currentUserId) {
           decryptedMsg.status = "seen";
-          socket.emit("mark_seen", { senderId: decryptedMsg.sender, receiverId: currentSession?.user?.id });
+          if (currentChat.isGroup) {
+            socket.emit("mark_seen", { chatId: messageChatId || currentChatId, receiverId: currentUserId });
+          } else {
+            socket.emit("mark_seen", { senderId: senderId, receiverId: currentUserId });
+          }
           fetch("/api/messages", {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ messageId: decryptedMsg._id, status: "seen" }),
-          });
+          }).catch((err) => console.error("Failed to mark message as seen:", err));
         }
-        setMessages((prev) => [...prev, decryptedMsg]);
-        scrollToBottom();
-      } else if (decryptedMsg.sender !== currentSession?.user?.id) {
-        // Message from someone we're not chatting with — increment unread
-        socket.emit("message_delivered", { messageId: decryptedMsg._id, senderId: decryptedMsg.sender });
+      } else if (senderId && senderId !== currentUserId) {
+        // Message from someone we're not currently chatting with — emit delivery & increment unread
+        socket.emit("message_delivered", { messageId: decryptedMsg._id, senderId: senderId });
         fetch("/api/messages", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ messageId: decryptedMsg._id, status: "delivered" }),
-        });
+        }).catch((err) => console.error("Failed to mark message as delivered:", err));
+
+        // Increment unread count for matching chat in the list
         setChats((prev) =>
-          prev.map((c) =>
-            c.otherUser?._id === decryptedMsg.sender
-              ? { ...c, unreadCount: (c.unreadCount || 0) + 1 }
-              : c
-          )
+          prev.map((c) => {
+            const isMatch = Boolean(
+              (messageChatId && String(c._id) === messageChatId) ||
+              (!c.isGroup && c.otherUser?._id && String(c.otherUser._id) === senderId)
+            );
+            return isMatch ? { ...c, unreadCount: (c.unreadCount || 0) + 1 } : c;
+          })
         );
       }
 
-      // Update latest message in chat list and re-sort
+      // Update latest message in chat list and re-sort (for both active and inactive conversations)
       setChats((prev) => {
-        const currentSession2 = sessionRef.current;
-        const currentChat2 = selectedChatRef.current;
-        const isFromOther = decryptedMsg.sender !== currentSession2?.user?.id;
-        const relevantUserId = isFromOther ? decryptedMsg.sender : currentChat2?.otherUser?._id;
-        
-        const exists = prev.some((c) => c.otherUser?._id === relevantUserId);
-        
+        const isFromOther = senderId !== currentUserId;
+
+        // Find if this chat already exists in our chat list
+        const exists = prev.some((c) =>
+          Boolean(
+            (messageChatId && String(c._id) === messageChatId) ||
+            (!c.isGroup && c.otherUser?._id && (
+              String(c.otherUser._id) === senderId ||
+              (otherUserId && String(c.otherUser._id) === otherUserId && senderId === currentUserId)
+            ))
+          )
+        );
+
         if (!exists && isFromOther) {
-           // New chat from someone we don't have in our list yet
-           fetchChatsRef.current();
-           return prev;
+          // New conversation from someone not yet in our chat list
+          fetchChatsRef.current();
+          return prev;
         }
 
+        const previewContent = decryptedMsg.content || (
+          decryptedMsg.type === "image" ? "📷 Photo" :
+          decryptedMsg.type === "file" ? "📎 Attachment" :
+          decryptedMsg.type === "voice" ? "🎤 Voice message" :
+          decryptedMsg.type === "poll" ? "📊 Poll" : ""
+        );
+
         const updated = prev.map((c) => {
-          const isThisChat = c.otherUser?._id === relevantUserId;
+          const isThisChat = Boolean(
+            (messageChatId && String(c._id) === messageChatId) ||
+            (!c.isGroup && c.otherUser?._id && (
+              String(c.otherUser._id) === senderId ||
+              (otherUserId && String(c.otherUser._id) === otherUserId && senderId === currentUserId)
+            ))
+          );
           if (isThisChat) {
             return {
               ...c,
-              latestMessage: { content: decryptedMsg.content, sender: decryptedMsg.sender, createdAt: decryptedMsg.createdAt, type: decryptedMsg.type || "text" },
+              latestMessage: {
+                content: previewContent,
+                sender: senderId,
+                createdAt: decryptedMsg.createdAt || new Date().toISOString(),
+                type: decryptedMsg.type || "text",
+                _id: decryptedMsg._id,
+              },
               updatedAt: decryptedMsg.createdAt || new Date().toISOString(),
             };
           }
           return c;
         });
-        return updated.sort((a, b) =>
+
+        return [...updated].sort((a, b) =>
           new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime()
         );
       });
     };
 
-    const handleMessagesSeen = ({ receiverId, readAt }: { receiverId: string; readAt?: string }) => {
-      if (selectedChatRef.current?.otherUser?._id === receiverId) {
+    const handleMessagesSeen = ({ chatId, receiverId, readAt }: { chatId?: string; receiverId: string; readAt?: string }) => {
+      const currentChat = selectedChatRef.current;
+      const isMatch = Boolean(
+        currentChat && (
+          (chatId && String(currentChat._id) === String(chatId)) ||
+          (currentChat.otherUser?._id && String(currentChat.otherUser._id) === String(receiverId))
+        )
+      );
+      if (isMatch) {
         setMessages((prev) =>
           prev.map((m) => {
             if (m.status !== "seen") {
               const updatedReadBy = [...(m.readBy || [])];
               const dateVal = readAt ? new Date(readAt) : new Date();
-              if (!updatedReadBy.some((r: any) => (r.userId?.toString() === receiverId || r.userId?._id?.toString() === receiverId))) {
+              if (!updatedReadBy.some((r: any) => {
+                const rUserId = typeof r.userId === "object" && r.userId !== null
+                  ? String(r.userId._id || r.userId.id || "")
+                  : String(r.userId || "");
+                return rUserId === String(receiverId);
+              })) {
                 updatedReadBy.push({ userId: receiverId, readAt: dateVal } as any);
               }
               return { ...m, status: "seen", readBy: updatedReadBy };
@@ -898,9 +1200,21 @@ export default function ChatPage() {
         const decryptedArr = await decryptMessagesArray([message]);
         decryptedMsg = decryptedArr[0];
       }
+      const editedSenderId =
+        typeof decryptedMsg.sender === "object" && decryptedMsg.sender !== null
+          ? String(decryptedMsg.sender._id || decryptedMsg.sender.id || "")
+          : String(decryptedMsg.sender || "");
+      const editedChatId =
+        chatId ||
+        (typeof decryptedMsg.chat === "object" && decryptedMsg.chat !== null
+          ? String(decryptedMsg.chat._id || decryptedMsg.chat.id || "")
+          : String(decryptedMsg.chat || ""));
+
       setMessages((prev) => prev.map((m) => m._id === decryptedMsg._id ? decryptedMsg : m));
       setChats((prev) => prev.map((c) => {
-        const isThisChat = chatId ? c._id === chatId : (c.otherUser?._id === decryptedMsg.sender || c.otherUser?._id === decryptedMsg.chat);
+        const isThisChat = editedChatId
+          ? String(c._id) === editedChatId
+          : Boolean(c.otherUser?._id && String(c.otherUser._id) === editedSenderId);
         if (isThisChat && c.latestMessage?._id === decryptedMsg._id) {
           return {
             ...c,
@@ -912,7 +1226,7 @@ export default function ChatPage() {
     };
 
     // Message delete socket handler
-    const handleMessageDeleted = ({ chatId, messageId }: { chatId?: string; messageId: string }) => {
+    const handleMessageDeleted = ({ messageId }: { chatId?: string; messageId: string }) => {
       setMessages((prev) => prev.map((m) => m._id === messageId ? { ...m, deletedForEveryone: true, content: "" } : m));
       setChats((prev) => prev.map((c) => {
         if (c.latestMessage?._id === messageId) {
@@ -926,9 +1240,19 @@ export default function ChatPage() {
     };
 
     // Message pin/unpin socket handlers
-    const handleMessagePinned = ({ chatId, message, pinnedCount }: { chatId?: string; message: any; pinnedCount: number }) => {
+    const handleMessagePinned = ({ chatId, message }: { chatId?: string; message: any }) => {
+      const pinSenderId =
+        typeof message.sender === "object" && message.sender !== null
+          ? String(message.sender._id || message.sender.id || "")
+          : String(message.sender || "");
+      const pinChatId =
+        chatId ||
+        (typeof message.chat === "object" && message.chat !== null
+          ? String(message.chat._id || message.chat.id || "")
+          : String(message.chat || ""));
+
       setSelectedChat((prev: any) => {
-        const isThisChat = prev && (chatId ? prev._id === chatId : (prev.otherUser?._id === message.sender || prev.otherUser?._id === message.chat));
+        const isThisChat = prev && (pinChatId ? String(prev._id) === pinChatId : Boolean(prev.otherUser?._id && String(prev.otherUser._id) === pinSenderId));
         if (isThisChat) {
           const list = prev.pinnedMessages || [];
           if (!list.includes(message._id)) {
@@ -939,7 +1263,7 @@ export default function ChatPage() {
       });
     };
 
-    const handleMessageUnpinned = ({ chatId, messageId, pinnedCount }: { chatId?: string; messageId: string; pinnedCount: number }) => {
+    const handleMessageUnpinned = ({ messageId }: { messageId: string }) => {
       setSelectedChat((prev: any) => {
         if (prev) {
           return { ...prev, pinnedMessages: (prev.pinnedMessages || []).filter((id: string) => id !== messageId) };
@@ -950,6 +1274,18 @@ export default function ChatPage() {
 
     const handleRefreshCalls = () => {
       fetchCallsRef.current();
+    };
+
+    const handleTimerUpdated = ({ chatId, timer }: { chatId?: string; timer: number }) => {
+      setSelectedChat((prev: any) => {
+        if (prev && (!chatId || String(prev._id) === String(chatId))) {
+          return { ...prev, disappearingTimer: timer };
+        }
+        return prev;
+      });
+      setChats((prev) =>
+        prev.map((c) => (String(c._id) === String(chatId) ? { ...c, disappearingTimer: timer } : c))
+      );
     };
 
     socket.on("receive_message", handleReceiveMessage);
@@ -969,6 +1305,7 @@ export default function ChatPage() {
     socket.on("message_deleted", handleMessageDeleted);
     socket.on("message_pinned", handleMessagePinned);
     socket.on("message_unpinned", handleMessageUnpinned);
+    socket.on("timer_updated", handleTimerUpdated);
 
     return () => {
       socket.off("receive_message", handleReceiveMessage);
@@ -988,20 +1325,9 @@ export default function ChatPage() {
       socket.off("message_deleted", handleMessageDeleted);
       socket.off("message_pinned", handleMessagePinned);
       socket.off("message_unpinned", handleMessageUnpinned);
+      socket.off("timer_updated", handleTimerUpdated);
     };
-  }, [socket, decryptMessagesArray]); // stable — never re-registers due to selectedChat/session changes
-
-  const scrollToBottom = useCallback((behavior: ScrollBehavior = "smooth") => {
-    // Scroll the messages container vertically directly to avoid any document-level horizontal shift
-    if (messagesContainerRef.current) {
-      messagesContainerRef.current.scrollTo({
-        top: messagesContainerRef.current.scrollHeight,
-        behavior,
-      });
-    } else if (messagesEndRef.current) {
-      messagesEndRef.current.scrollIntoView({ behavior, block: "end", inline: "nearest" });
-    }
-  }, []);
+  }, [socket, decryptMessagesArray, scrollToBottom]); // stable — never re-registers due to selectedChat/session changes
 
   // ── Reaction handler ──────────────────────────────────────────────────
   const REACTION_EMOJIS = ["👍", "❤️", "😂", "😮", "😢", "🔥"];
@@ -1207,6 +1533,198 @@ export default function ChatPage() {
     }
   };
 
+  // Configure disappearing message timer for active chat
+  const handleSetDisappearingTimer = async (seconds: number) => {
+    if (!selectedChat?._id) return;
+    setTimerLoading(true);
+    try {
+      const res = await fetch("/api/chats", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ chatId: selectedChat._id, disappearingTimer: seconds }),
+      });
+      if (res.ok) {
+        setSelectedChat((prev: any) => (prev ? { ...prev, disappearingTimer: seconds } : prev));
+        setChats((prev) =>
+          prev.map((c) => (String(c._id) === String(selectedChat._id) ? { ...c, disappearingTimer: seconds } : c))
+        );
+        if (socket) {
+          if (selectedChat.isGroup) {
+            socket.emit("timer_updated", { chatId: selectedChat._id, timer: seconds });
+          } else if (selectedChat.otherUser?._id) {
+            socket.emit("timer_updated", { receiverId: selectedChat.otherUser._id, timer: seconds, chatId: selectedChat._id });
+          }
+        }
+        setShowTimerModal(false);
+      }
+    } catch (err) {
+      console.error("Failed to update disappearing timer:", err);
+    } finally {
+      setTimerLoading(false);
+    }
+  };
+
+  // Export clean decrypted plaintext chat history as a downloadable .txt file
+  const handleExportChat = () => {
+    if (!selectedChat) return;
+    if (messages.length === 0) {
+      alert("No messages to export in this conversation.");
+      return;
+    }
+
+    const currentChatName = selectedChat.chatName || "Chat";
+    const nowStr = format(new Date(), "yyyy-MM-dd HH:mm:ss");
+    const separator = "=".repeat(64);
+
+    let exportContent = `${separator}\n`;
+    exportContent += `ZLINE CHAT HISTORY EXPORT\n`;
+    exportContent += `Conversation: ${currentChatName}\n`;
+    exportContent += `Exported At:  ${nowStr}\n`;
+    exportContent += `Messages:     ${messages.length}\n`;
+    exportContent += `Security:     End-to-End Encrypted (v3.0 Multi-Device)\n`;
+    exportContent += `Decryption:   Plaintext Export generated locally by account owner\n`;
+    exportContent += `Retention:    Maximum 7 days / Chat disappearing timer: ${formatTimerLabel(selectedChat.disappearingTimer)}\n`;
+    exportContent += `${separator}\n\n`;
+
+    messages.forEach((msg) => {
+      const msgDate = msg.createdAt ? format(new Date(msg.createdAt), "yyyy-MM-dd HH:mm:ss") : "Unknown Date";
+      const isMe = msg.sender === session?.user?.id || msg.sender?._id === session?.user?.id;
+      const senderName = isMe ? "You" : (msg.sender?.name || selectedChat.chatName || "Participant");
+
+      let bodyText = msg.content || "";
+      if (msg.type === "image") {
+        bodyText = `[📷 Photo: ${msg.fileName || "Image"}${msg.fileSize ? ` (${(msg.fileSize / 1024 / 1024).toFixed(2)} MB)` : ""}]${bodyText ? ` - Caption: ${bodyText}` : ""}`;
+      } else if (msg.type === "file") {
+        bodyText = `[📎 File: ${msg.fileName || "Attachment"}${msg.fileSize ? ` (${(msg.fileSize / 1024 / 1024).toFixed(2)} MB)` : ""}]${bodyText ? ` - Caption: ${bodyText}` : ""}`;
+      } else if (msg.type === "voice") {
+        bodyText = `[🎤 Voice Message${msg.voiceDuration ? ` (${msg.voiceDuration}s)` : ""}]`;
+      } else if (msg.type === "poll") {
+        bodyText = `[📊 Poll: ${msg.poll?.question || "Poll"}]`;
+      }
+
+      if (msg.deletedForEveryone) {
+        bodyText = `[This message was deleted]`;
+      }
+
+      exportContent += `[${msgDate}] ${senderName}:\n${bodyText}\n\n`;
+    });
+
+    exportContent += `${separator}\n`;
+    exportContent += `End of Chat Export • Zline Messaging System\n`;
+    exportContent += `${separator}\n`;
+
+    const blob = new Blob([exportContent], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    const safeName = currentChatName.toLowerCase().replace(/[^a-z0-9]/gi, "_");
+    link.href = url;
+    link.download = `zline_chat_${safeName}_${format(new Date(), "yyyyMMdd_HHmmss")}.txt`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  // Catch Me Up - Instant AI Conversation Briefing
+  const handleCatchMeUp = useCallback(async () => {
+    if (!selectedChat || messages.length === 0) return;
+    setShowCatchMeUpModal(true);
+    setCatchMeUpLoading(true);
+    setCatchMeUpSummary("");
+    setCatchMeUpCopied(false);
+
+    try {
+      const recentMsgs = messages.slice(-25).map((m) => {
+        const isMe = m.sender === session?.user?.id || m.sender?._id === session?.user?.id;
+        const name = isMe ? "You" : (m.sender?.name || selectedChat.chatName || "User");
+        return `${name}: ${m.content || "[Media/Attachment]"}`;
+      }).join("\n");
+
+      const prompt = `You are Zino, Zline's intelligent assistant. Provide an executive 'Catch Me Up' briefing for the conversation "${selectedChat.chatName}".
+Here is the recent decrypted conversation snippet:
+${recentMsgs}
+
+Please generate a structured, easy-to-read briefing with the following markdown sections:
+### 📌 Executive Summary
+(1-2 clear, punchy sentences summarizing the discussion)
+
+### 💡 Key Takeaways
+- Bullet points of important updates, decisions, or shared information
+
+### ✅ Action Items & Tasks
+- Bullet points of next steps, responsibilities, or tasks agreed upon (or write "None identified" if none).
+
+Keep it concise, professional, and directly useful.`;
+
+      const res = await fetch("/api/ai/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          stream: false,
+          messages: [{ role: "user", content: prompt }],
+        }),
+      });
+
+      if (!res.ok) throw new Error("Failed to generate summary");
+      const data = await res.json();
+      setCatchMeUpSummary(data.content || "Unable to summarize conversation at this time.");
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Error summarizing";
+      setCatchMeUpSummary(`⚠️ Could not generate briefing: ${msg}`);
+    } finally {
+      setCatchMeUpLoading(false);
+    }
+  }, [selectedChat, messages, session?.user?.id]);
+
+  // Inline Message Translation with Zino AI
+  const handleTranslateMessage = useCallback(async (msg: any) => {
+    if (!msg?._id || !msg?.content) return;
+    const msgId = msg._id;
+
+    if (translatedMessages[msgId]?.text) {
+      setTranslatedMessages((prev) => {
+        const copy = { ...prev };
+        delete copy[msgId];
+        return copy;
+      });
+      return;
+    }
+
+    setTranslatedMessages((prev) => ({
+      ...prev,
+      [msgId]: { text: "", loading: true },
+    }));
+
+    try {
+      const res = await fetch("/api/ai/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          stream: false,
+          messages: [
+            {
+              role: "user",
+              content: `Translate the following text into English (or if it is already in English, translate it into Spanish). Return ONLY the direct translated text without explanations, labels, or quotation marks:\n\n${msg.content}`,
+            },
+          ],
+        }),
+      });
+
+      if (!res.ok) throw new Error("Translation failed");
+      const data = await res.json();
+      setTranslatedMessages((prev) => ({
+        ...prev,
+        [msgId]: { text: data.content || "Translation unavailable.", loading: false },
+      }));
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Translation error";
+      setTranslatedMessages((prev) => ({
+        ...prev,
+        [msgId]: { text: "", loading: false, error: message },
+      }));
+    }
+  }, [translatedMessages]);
+
   // Core: send a message object (text or media) to the API + socket
   const dispatchMessage = async (payload: {
     content?: string;
@@ -1226,20 +1744,33 @@ export default function ChatPage() {
       } else {
         if (!selectedChat.otherUser?._id) return;
         body.receiverId = selectedChat.otherUser._id;
+      }
 
-        // Perform E2EE if recipient public key is available and message is text type
-        if (recipientPublicKey && payload.type === "text" && payload.content) {
-          try {
-            const myPublicKey = session?.user?.id ? localStorage.getItem(`zline_e2e_public_key_${session.user.id}`) : null;
-            const encrypted = await encryptMessage(payload.content, recipientPublicKey, myPublicKey || undefined);
-            body.content = encrypted.encryptedContent;
-            body.isEncrypted = true;
-            body.encAesKey = encrypted.encAesKey;
-            body.encAesKeyForSender = encrypted.encAesKeyForSender;
-            body.iv = encrypted.iv;
-          } catch (cryptoErr) {
-            console.error("Encryption failed, sending unencrypted fallback:", cryptoErr);
-          }
+      // Perform v3.0 Multi-Device E2EE if recipient devices are available and message is text type
+      if (payload.type === "text" && payload.content && targetRecipientDevices.length > 0 && localDevice) {
+        try {
+          const encrypted = await encryptMultiRecipientMessage(
+            payload.content,
+            targetRecipientDevices,
+            {
+              deviceId: localDevice.deviceId,
+              userId: session?.user?.id,
+              publicKey: localDevice.publicKeyJwk,
+            }
+          );
+          body.content = encrypted.ciphertext;
+          body.isEncrypted = true;
+          body.keyEnvelopes = encrypted.keyEnvelopes;
+          body.encAesKey = encrypted.encAesKey;
+          body.encAesKeyForSender = encrypted.encAesKeyForSender;
+          body.iv = encrypted.iv;
+          body.senderDeviceId = localDevice.deviceId;
+          body.cryptographicVersion = "3.0";
+        } catch (cryptoErr: any) {
+          console.error("Encryption failed:", cryptoErr);
+          // RULE 13: Never silently bypass encryption when an error occurs
+          setMediaError("Encryption failed: " + (cryptoErr?.message || "Failed to wrap message keys"));
+          return;
         }
       }
 
@@ -1312,7 +1843,7 @@ export default function ChatPage() {
       if (!selectedChat._id) {
         setSelectedChat((prev: any) => ({ ...prev, _id: message.chat }));
       }
-    } catch (error) {
+    } catch {
       console.error("Failed to send message");
       setMediaError("Failed to send message.");
     }
@@ -1338,9 +1869,13 @@ export default function ChatPage() {
     }
   };
 
-  // Send text message
+  // Send message (text or pending files)
   const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (pendingFiles.length > 0) {
+      uploadAndSendPendingFiles();
+      return;
+    }
     if (!newMessage.trim() || !selectedChat) return;
     const content = newMessage;
     setNewMessage("");
@@ -1386,16 +1921,18 @@ export default function ChatPage() {
         const contentType = res.headers.get("content-type") || "";
 
         if (contentType.includes("text/event-stream") && res.body) {
-          const aiMsgId = "ai_" + Date.now();
-          let streamingText = "";
-          let capturedSources: any[] = [];
-          let capturedQuery: string | undefined = undefined;
+          const aiMsgId = "ai_" + new Date().getTime();
+          const streamContext = {
+            text: "",
+            sources: [] as any[],
+            query: undefined as string | undefined,
+          };
 
           // Placeholder AI message being populated via stream
           const initialAiMsg = {
             _id: aiMsgId,
             content: "",
-            sender: { _id: AI_CHAT_ID, name: "Zline AI" },
+            sender: { _id: AI_CHAT_ID, name: "Zino" },
             createdAt: new Date().toISOString(),
             type: "text",
             isAi: true,
@@ -1432,31 +1969,31 @@ export default function ChatPage() {
                   setAiSearchStatus({ stage: "reasoning" });
                   scrollToBottom();
                 } else if (eventType === "sources") {
-                  capturedSources = eventData.sources || [];
-                  capturedQuery = eventData.query;
+                  streamContext.sources = eventData.sources || [];
+                  streamContext.query = eventData.query;
                   setMessages((prev) =>
                     prev.map((m) =>
                       m._id === aiMsgId
-                        ? { ...m, sources: capturedSources, searchQuery: capturedQuery }
+                        ? { ...m, sources: streamContext.sources, searchQuery: streamContext.query }
                         : m
                     )
                   );
                 } else if (eventType === "delta") {
-                  streamingText += eventData.text || "";
+                  streamContext.text += eventData.text || "";
                   setMessages((prev) =>
                     prev.map((m) =>
-                      m._id === aiMsgId ? { ...m, content: streamingText } : m
+                      m._id === aiMsgId ? { ...m, content: streamContext.text } : m
                     )
                   );
                   scrollToBottom();
                 } else if (eventType === "done") {
-                  if (eventData.content) streamingText = eventData.content;
-                  if (eventData.sources) capturedSources = eventData.sources;
-                  if (eventData.searchQuery) capturedQuery = eventData.searchQuery;
+                  if (eventData.content) streamContext.text = eventData.content;
+                  if (eventData.sources) streamContext.sources = eventData.sources;
+                  if (eventData.searchQuery) streamContext.query = eventData.searchQuery;
                 } else if (eventType === "error") {
                   throw new Error(eventData.message || "Streaming error");
                 }
-              } catch (parseErr) {
+              } catch {
                 // Ignore incomplete JSON chunks
               }
             }
@@ -1464,13 +2001,13 @@ export default function ChatPage() {
 
           const finalizedAiMsg = {
             _id: aiMsgId,
-            content: streamingText,
-            sender: { _id: AI_CHAT_ID, name: "Zline AI" },
+            content: streamContext.text,
+            sender: { _id: AI_CHAT_ID, name: "Zino" },
             createdAt: new Date().toISOString(),
             type: "text",
             isAi: true,
-            sources: capturedSources,
-            searchQuery: capturedQuery,
+            sources: streamContext.sources,
+            searchQuery: streamContext.query,
           };
 
           const finalMsgs = [...updatedMessages, finalizedAiMsg];
@@ -1482,7 +2019,7 @@ export default function ChatPage() {
             );
           }
           setAiLatestMessage({
-            content: streamingText,
+            content: streamContext.text,
             createdAt: finalizedAiMsg.createdAt,
           });
         } else {
@@ -1491,7 +2028,7 @@ export default function ChatPage() {
           const aiMsg = {
             _id: "ai_" + Date.now(),
             content: data.content,
-            sender: { _id: AI_CHAT_ID, name: "Zline AI" },
+            sender: { _id: AI_CHAT_ID, name: "Zino" },
             createdAt: new Date().toISOString(),
             type: "text",
             isAi: true,
@@ -1519,7 +2056,7 @@ export default function ChatPage() {
           content: `⚠️ Sorry, I encountered an issue: ${
             err.message || "Please try again later."
           }`,
-          sender: { _id: AI_CHAT_ID, name: "Zline AI" },
+          sender: { _id: AI_CHAT_ID, name: "Zino" },
           createdAt: new Date().toISOString(),
           type: "text",
           isAi: true,
@@ -1549,17 +2086,29 @@ export default function ChatPage() {
         const body: any = { messageId: msgToEdit._id, content };
         
         // Handle E2EE re-encryption for edited message
-        if (msgToEdit.isEncrypted && recipientPublicKey) {
+        if (msgToEdit.isEncrypted && targetRecipientDevices.length > 0 && localDevice) {
           try {
-            const myPublicKey = session?.user?.id ? localStorage.getItem(`zline_e2e_public_key_${session.user.id}`) : null;
-            const encrypted = await encryptMessage(content, recipientPublicKey, myPublicKey || undefined);
-            body.content = encrypted.encryptedContent;
+            const encrypted = await encryptMultiRecipientMessage(
+              content,
+              targetRecipientDevices,
+              {
+                deviceId: localDevice.deviceId,
+                userId: session?.user?.id,
+                publicKey: localDevice.publicKeyJwk,
+              }
+            );
+            body.content = encrypted.ciphertext;
             body.isEncrypted = true;
+            body.keyEnvelopes = encrypted.keyEnvelopes;
             body.encAesKey = encrypted.encAesKey;
             body.encAesKeyForSender = encrypted.encAesKeyForSender;
             body.iv = encrypted.iv;
+            body.senderDeviceId = localDevice.deviceId;
+            body.cryptographicVersion = "3.0";
           } catch (cryptoErr) {
             console.error("Encryption failed for E2EE edit:", cryptoErr);
+            setMediaError("Encryption failed while updating edited message.");
+            return;
           }
         }
 
@@ -1596,89 +2145,153 @@ export default function ChatPage() {
     }
   };
 
-  // File selection
-  const selectFile = (file: File) => {
+  // Multiple files selection with max 50MB per selection limit
+  const selectFiles = (files: FileList | File[]) => {
     setMediaError(null);
-    if (file.size > 100 * 1024 * 1024) {
-      setMediaError("File too large. Maximum size is 100MB.");
-      return;
-    }
-    setPendingFile(file);
-    if (file.type.startsWith("image/")) {
-      const url = URL.createObjectURL(file);
-      setPendingFilePreview(url);
-    } else {
-      setPendingFilePreview(null);
-    }
+    if (!files || files.length === 0) return;
+
+    const fileList = Array.from(files);
+
+    setPendingFiles((prev) => {
+      const currentTotal = prev.reduce((acc, p) => acc + p.file.size, 0);
+      const newSelectionTotal = fileList.reduce((acc, f) => acc + f.size, 0);
+      const combinedTotal = currentTotal + newSelectionTotal;
+
+      if (combinedTotal > MAX_TOTAL_FILES_BYTES) {
+        const totalMb = (combinedTotal / (1024 * 1024)).toFixed(1);
+        setMediaError(`Selection exceeds 50MB limit (${totalMb}MB total). Please select fewer or smaller files.`);
+        return prev;
+      }
+
+      const newAttachments: PendingAttachment[] = fileList.map((file) => ({
+        id: `${Date.now()}_${Math.random().toString(36).substring(2, 9)}_${file.name}`,
+        file,
+        previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : null,
+      }));
+
+      return [...prev, ...newAttachments];
+    });
   };
 
-  // Upload and send the pending file via XMLHttpRequest for progress tracking
-  const uploadAndSendPendingFile = async () => {
-    if (!pendingFile || !selectedChat?.otherUser) return;
-    const file = pendingFile;
-    setPendingFile(null);
-    if (pendingFilePreview) {
-      URL.revokeObjectURL(pendingFilePreview);
-      setPendingFilePreview(null);
-    }
+  const removePendingFile = (id: string) => {
+    setPendingFiles((prev) => {
+      const target = prev.find((p) => p.id === id);
+      if (target?.previewUrl) {
+        URL.revokeObjectURL(target.previewUrl);
+      }
+      return prev.filter((p) => p.id !== id);
+    });
+  };
 
+  const clearPendingFiles = () => {
+    setPendingFiles((prev) => {
+      prev.forEach((p) => {
+        if (p.previewUrl) URL.revokeObjectURL(p.previewUrl);
+      });
+      return [];
+    });
+    setMediaError(null);
+  };
+
+  // Upload and send all pending files with overall and per-file progress tracking
+  const uploadAndSendPendingFiles = async () => {
+    if (pendingFiles.length === 0 || !selectedChat) return;
+    const filesToUpload = [...pendingFiles];
+    const caption = newMessage.trim();
+    setNewMessage("");
+    setPendingFiles([]);
     setIsUploading(true);
-    setUploadProgress(0);
+    setMediaError(null);
+    setUploadProgress({ current: 1, total: filesToUpload.length, percent: 0 });
 
-    const xhr = new XMLHttpRequest();
-    const formData = new FormData();
-    formData.append("file", file);
+    try {
+      for (let i = 0; i < filesToUpload.length; i++) {
+        const item = filesToUpload[i];
 
-    xhr.upload.addEventListener("progress", (event) => {
-      if (event.lengthComputable) {
-        const percentage = Math.round((event.loaded / event.total) * 100);
-        setUploadProgress(percentage);
-      }
-    });
+        const uploadResult = await new Promise<{
+          fileUrl: string;
+          fileName: string;
+          fileSize: number;
+          type: "image" | "voice" | "file";
+        }>((resolve, reject) => {
+          const xhr = new XMLHttpRequest();
+          const formData = new FormData();
+          formData.append("file", item.file);
 
-    xhr.addEventListener("load", async () => {
-      setUploadProgress(null);
-      setIsUploading(false);
-      if (xhr.status >= 200 && xhr.status < 300) {
-        try {
-          const response = JSON.parse(xhr.responseText);
-          const { fileUrl, fileName, fileSize, type } = response;
-          await dispatchMessage({ content: "", type, fileUrl, fileName, fileSize });
-        } catch (e) {
-          setMediaError("Failed to parse server response.");
+          xhr.upload.addEventListener("progress", (event) => {
+            if (event.lengthComputable) {
+              const filePercent = event.loaded / event.total;
+              const overallPercent = Math.round(((i + filePercent) / filesToUpload.length) * 100);
+              setUploadProgress({
+                current: i + 1,
+                total: filesToUpload.length,
+                percent: Math.min(overallPercent, 99),
+              });
+            }
+          });
+
+          xhr.addEventListener("load", () => {
+            if (xhr.status >= 200 && xhr.status < 300) {
+              try {
+                const response = JSON.parse(xhr.responseText);
+                resolve(response);
+              } catch {
+                reject(new Error("Failed to parse server upload response."));
+              }
+            } else {
+              try {
+                const err = JSON.parse(xhr.responseText);
+                reject(new Error(err.message || `Upload failed with status ${xhr.status}`));
+              } catch {
+                reject(new Error(`Upload failed with status ${xhr.status}`));
+              }
+            }
+          });
+
+          xhr.addEventListener("error", () => {
+            reject(new Error("Upload failed due to a network error."));
+          });
+
+          xhr.open("POST", "/api/upload");
+          xhr.send(formData);
+        });
+
+        // Revoke object URL
+        if (item.previewUrl) {
+          URL.revokeObjectURL(item.previewUrl);
         }
-      } else {
-        try {
-          const err = JSON.parse(xhr.responseText);
-          setMediaError(err.message || "Upload failed");
-        } catch {
-          setMediaError(`Upload failed with status ${xhr.status}`);
-        }
+
+        // Send the message into chat (caption attached to first file)
+        const fileCaption = i === 0 ? caption : "";
+        await dispatchMessage({
+          content: fileCaption,
+          type: uploadResult.type,
+          fileUrl: uploadResult.fileUrl,
+          fileName: uploadResult.fileName,
+          fileSize: uploadResult.fileSize,
+        });
       }
-    });
-
-    xhr.addEventListener("error", () => {
-      setUploadProgress(null);
+    } catch (err: unknown) {
+      console.error("Upload error:", err);
+      setMediaError(err instanceof Error ? err.message : "Failed to upload file(s).");
+    } finally {
       setIsUploading(false);
-      setMediaError("Upload failed due to a network error.");
-    });
-
-    xhr.open("POST", "/api/upload");
-    xhr.send(formData);
+      setUploadProgress(null);
+    }
   };
 
-  // Upload a file/image and send (fallback trigger for input change)
-  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !selectedChat?.otherUser) return;
+  // Upload multiple files/images and send (trigger for input change)
+  const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0 || !selectedChat) return;
+    selectFiles(files);
     e.target.value = "";
-    selectFile(file);
   };
 
   // Drag and drop event handlers
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
-    if (!selectedChat?.otherUser) return;
+    if (!selectedChat) return;
     setIsDragging(true);
   };
 
@@ -1690,10 +2303,10 @@ export default function ChatPage() {
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
-    if (!selectedChat?.otherUser) return;
-    const file = e.dataTransfer.files?.[0];
-    if (file) {
-      selectFile(file);
+    if (!selectedChat) return;
+    const files = e.dataTransfer.files;
+    if (files && files.length > 0) {
+      selectFiles(files);
     }
   };
 
@@ -1808,6 +2421,188 @@ export default function ChatPage() {
 
   const filteredMessages = messages;
 
+  // Density styles for chat list items
+  const densityStyles = {
+    compact: {
+      itemPadding: "px-2.5 py-1.5",
+      avatarSize: "w-8 h-8",
+      titleSize: "text-xs font-semibold",
+      previewSize: "text-[11px]",
+      timeSize: "text-[9px]",
+      gap: "gap-2.5",
+    },
+    normal: {
+      itemPadding: "px-3 py-3",
+      avatarSize: "w-11 h-11",
+      titleSize: "text-sm font-semibold",
+      previewSize: "text-xs",
+      timeSize: "text-[10px]",
+      gap: "gap-3",
+    },
+    spacious: {
+      itemPadding: "px-3.5 py-4",
+      avatarSize: "w-12 h-12",
+      titleSize: "text-base font-semibold",
+      previewSize: "text-sm",
+      timeSize: "text-xs",
+      gap: "gap-3.5",
+    },
+  }[chatListDensity] || {
+    itemPadding: "px-3 py-3",
+    avatarSize: "w-11 h-11",
+    titleSize: "text-sm font-semibold",
+    previewSize: "text-xs",
+    timeSize: "text-[10px]",
+    gap: "gap-3",
+  };
+
+  const renderSizeControlsPopover = () => (
+    <div className="relative">
+      <button
+        onClick={() => setShowSizeControls(!showSizeControls)}
+        className={`p-2 transition-colors rounded-lg cursor-pointer ${
+          showSizeControls
+            ? "text-blue-600 bg-blue-50 dark:bg-blue-950/40"
+            : "text-gray-500 hover:text-blue-600 hover:bg-gray-100 dark:hover:bg-zinc-800"
+        }`}
+        title="Adjust chat size & list density"
+        aria-label="Adjust chat size and list density"
+      >
+        <SlidersHorizontal className="h-5 w-5" />
+      </button>
+
+      {showSizeControls && (
+        <>
+          <div
+            className="fixed inset-0 z-40"
+            onClick={() => setShowSizeControls(false)}
+          />
+          <div className="absolute right-0 top-full mt-2 w-72 p-4 bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-2xl shadow-xl z-50 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-2 mb-3 border-b border-gray-100 dark:border-zinc-800">
+              <div className="flex items-center gap-2">
+                <SlidersHorizontal className="w-4 h-4 text-blue-600" />
+                <span className="text-xs font-bold text-gray-900 dark:text-white uppercase tracking-wider">
+                  Display & Sizing
+                </span>
+              </div>
+              <button
+                onClick={() => setShowSizeControls(false)}
+                className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-zinc-300 rounded-lg cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+
+            {/* Message Font Size */}
+            <div className="mb-4">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-xs font-medium text-gray-700 dark:text-zinc-300 flex items-center gap-1.5">
+                  <Type className="w-3.5 h-3.5 text-gray-500" /> Chat Text Size
+                </span>
+                <span className="text-[10px] uppercase font-bold text-blue-600 dark:text-blue-400">
+                  {chatFontSize}
+                </span>
+              </div>
+              <div className="grid grid-cols-4 gap-1.5 bg-gray-100 dark:bg-zinc-800 p-1 rounded-xl">
+                {(["sm", "md", "lg", "xl"] as const).map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => {
+                      setChatFontSize(s);
+                      try {
+                        localStorage.setItem("zline_chat_font_size", s);
+                        window.dispatchEvent(new CustomEvent("zline:chat_size_changed", { detail: { fontSize: s } }));
+                      } catch {}
+                    }}
+                    className={`py-1.5 text-xs font-semibold rounded-lg transition-all cursor-pointer ${
+                      chatFontSize === s
+                        ? "bg-white dark:bg-zinc-700 text-blue-600 dark:text-white shadow-xs"
+                        : "text-gray-600 dark:text-zinc-400 hover:text-gray-900 dark:hover:text-white"
+                    }`}
+                  >
+                    {s.toUpperCase()}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Chat List Density */}
+            <div className="mb-4">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-xs font-medium text-gray-700 dark:text-zinc-300 flex items-center gap-1.5">
+                  <Columns className="w-3.5 h-3.5 text-gray-500" /> Chat List Density
+                </span>
+                <span className="text-[10px] capitalize font-bold text-blue-600 dark:text-blue-400">
+                  {chatListDensity}
+                </span>
+              </div>
+              <div className="grid grid-cols-3 gap-1.5 bg-gray-100 dark:bg-zinc-800 p-1 rounded-xl">
+                {(["compact", "normal", "spacious"] as const).map((d) => (
+                  <button
+                    key={d}
+                    type="button"
+                    onClick={() => {
+                      setChatListDensity(d);
+                      try {
+                        localStorage.setItem("zline_chat_list_density", d);
+                        window.dispatchEvent(new CustomEvent("zline:chat_size_changed", { detail: { density: d } }));
+                      } catch {}
+                    }}
+                    className={`py-1.5 text-xs font-semibold rounded-lg transition-all capitalize cursor-pointer ${
+                      chatListDensity === d
+                        ? "bg-white dark:bg-zinc-700 text-blue-600 dark:text-white shadow-xs"
+                        : "text-gray-600 dark:text-zinc-400 hover:text-gray-900 dark:hover:text-white"
+                    }`}
+                  >
+                    {d}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Chat List Width Presets (Desktop) */}
+            <div className="hidden md:block">
+              <div className="flex items-center justify-between mb-1.5">
+                <span className="text-xs font-medium text-gray-700 dark:text-zinc-300">
+                  Sidebar Width
+                </span>
+                <span className="text-[10px] font-mono font-semibold text-gray-500 dark:text-zinc-400">
+                  {sidebarWidth}px
+                </span>
+              </div>
+              <div className="grid grid-cols-4 gap-1.5 bg-gray-100 dark:bg-zinc-800 p-1 rounded-xl">
+                {[300, 360, 420, 500].map((w) => (
+                  <button
+                    key={w}
+                    type="button"
+                    onClick={() => {
+                      setSidebarWidth(w);
+                      try {
+                        localStorage.setItem("zline_sidebar_width", w.toString());
+                        window.dispatchEvent(new CustomEvent("zline:chat_size_changed", { detail: { sidebarWidth: w } }));
+                      } catch {}
+                    }}
+                    className={`py-1 text-xs font-medium rounded-lg transition-all cursor-pointer ${
+                      Math.abs(sidebarWidth - w) < 20
+                        ? "bg-white dark:bg-zinc-700 text-blue-600 dark:text-white shadow-xs font-bold"
+                        : "text-gray-600 dark:text-zinc-400 hover:text-gray-900 dark:hover:text-white"
+                    }`}
+                  >
+                    {w}px
+                  </button>
+                ))}
+              </div>
+              <p className="text-[10px] text-gray-400 dark:text-zinc-500 mt-2 text-center">
+                Drag the divider between panels to resize freely
+              </p>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  );
+
   return (
     <div className="flex w-full max-w-full h-screen-mobile bg-gray-100 dark:bg-black overflow-hidden relative">
       {/* Primary Semantic H1 for SEO & Accessibility */}
@@ -1815,13 +2610,19 @@ export default function ChatPage() {
 
       {/* ===== SIDEBAR ===== */}
       {/* Mobile: full-screen when mobileView=="sidebar", hidden when mobileView=="chat" */}
-      {/* Tablet+: fixed width, always visible alongside chat */}
-      <div className={`
-        flex-shrink-0 bg-white border-r border-gray-200 dark:bg-zinc-950 dark:border-zinc-800 flex flex-col h-full
+      {/* Tablet+ / Desktop: consistent stable width whether chat is open or not */}
+      <div 
+        style={{
+          width: isDesktop ? `${sidebarWidth}px` : undefined,
+          minWidth: isDesktop ? `${sidebarWidth}px` : undefined,
+          maxWidth: isDesktop ? `${sidebarWidth}px` : undefined,
+        }}
+        className={`
+        flex-shrink-0 bg-white border-r border-gray-200 dark:bg-zinc-950 dark:border-zinc-800 flex flex-col h-full relative
         ${
           mobileView === "sidebar"
-            ? "flex w-full md:w-80 lg:w-84 xl:w-96"
-            : "hidden md:flex md:w-80 lg:w-84 xl:w-96"
+            ? "flex w-full md:w-auto"
+            : "hidden md:flex md:w-auto"
         }
       `}>
         {sidebarTab === "chats" ? (
@@ -2030,32 +2831,32 @@ export default function ChatPage() {
                   {/* Pinned Zline AI Assistant Item */}
                   <button
                     onClick={openAiChat}
-                    className={`w-full flex items-center gap-3 px-3 py-3 transition-colors border-b border-indigo-100/70 dark:border-indigo-950/60 ${
+                    className={`w-full flex items-center ${densityStyles.gap} ${densityStyles.itemPadding} transition-colors border-b border-indigo-100/70 dark:border-indigo-950/60 ${
                       selectedChat?.isAi
                         ? "bg-indigo-50/80 dark:bg-indigo-950/50"
                         : "bg-indigo-50/20 hover:bg-indigo-50/50 dark:bg-indigo-950/10 dark:hover:bg-indigo-950/30"
                     }`}
                   >
                     <div className="relative flex-shrink-0">
-                      <div className="w-11 h-11 rounded-full bg-white dark:bg-zinc-800 flex items-center justify-center p-2 shadow-sm ring-2 ring-indigo-200 dark:ring-indigo-900 border border-gray-100 dark:border-zinc-700">
-                        <AiIcon className="w-6 h-6" />
+                      <div className={`${densityStyles.avatarSize} rounded-full bg-white dark:bg-zinc-800 flex items-center justify-center p-1.5 shadow-sm ring-2 ring-indigo-200 dark:ring-indigo-900 border border-gray-100 dark:border-zinc-700`}>
+                        <AiIcon className="w-5 h-5" />
                       </div>
-                      <div className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-green-500 border-2 border-white dark:border-zinc-950 animate-pulse"></div>
+                      <div className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-green-500 border-2 border-white dark:border-zinc-950 animate-pulse"></div>
                     </div>
                     <div className="flex-1 min-w-0 text-left">
                       <div className="flex justify-between items-baseline">
                         <div className="flex items-center gap-1.5 min-w-0">
-                          <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">
-                            Zline AI
+                          <p className={`${densityStyles.titleSize} text-gray-900 dark:text-white truncate`}>
+                            Zino
                           </p>
                         </div>
                         {aiLatestMessage?.createdAt && (
-                          <span className="text-[10px] text-indigo-600 dark:text-indigo-400 flex-shrink-0 ml-2">
+                          <span className={`${densityStyles.timeSize} text-indigo-600 dark:text-indigo-400 flex-shrink-0 ml-2`}>
                             {formatChatTime(aiLatestMessage.createdAt)}
                           </span>
                         )}
                       </div>
-                      <p className="text-xs text-gray-500 dark:text-zinc-400 truncate mt-0.5">
+                      <p className={`${densityStyles.previewSize} text-gray-500 dark:text-zinc-400 truncate mt-0.5`}>
                         {aiLatestMessage?.content
                           ? aiLatestMessage.content.replace(/[\n#*`]/g, " ")
                           : "Ask reasoning puzzles, coding, math & more"}
@@ -2076,7 +2877,7 @@ export default function ChatPage() {
                       <button
                         key={chat._id || chat.otherUser?._id}
                         onClick={() => { setSelectedChat(chat); setMobileView("chat"); }}
-                        className={`w-full flex items-center gap-3 px-3 py-3 transition-colors border-b border-gray-50 dark:border-zinc-800/50 ${
+                        className={`w-full flex items-center ${densityStyles.gap} ${densityStyles.itemPadding} transition-colors border-b border-gray-50 dark:border-zinc-800/50 ${
                           !selectedChat?.isAi && selectedChat?.otherUser?._id === chat.otherUser?._id
                             ? "bg-blue-50 dark:bg-zinc-900"
                             : "hover:bg-gray-50 dark:hover:bg-zinc-900/50 active:bg-gray-100 dark:active:bg-zinc-900"
@@ -2086,20 +2887,20 @@ export default function ChatPage() {
                           <UserAvatar
                             image={chat.chatImage || chat.otherUser?.image}
                             name={chat.chatName}
-                            className="w-11 h-11"
+                            className={densityStyles.avatarSize}
                             variant="gray"
                           />
                           {chat.isOnline && (
-                            <div className="absolute bottom-0 right-0 w-3 h-3 rounded-full bg-green-500 border-2 border-white dark:border-zinc-950"></div>
+                            <div className="absolute bottom-0 right-0 w-2.5 h-2.5 rounded-full bg-green-500 border-2 border-white dark:border-zinc-950"></div>
                           )}
                         </div>
                         <div className="flex-1 min-w-0 text-left">
                           <div className="flex justify-between items-baseline">
-                            <p className="text-sm font-semibold text-gray-900 dark:text-white truncate">
+                            <p className={`${densityStyles.titleSize} text-gray-900 dark:text-white truncate`}>
                               {chat.chatName}
                             </p>
                             {chat.latestMessage?.createdAt && (
-                              <span className={`text-[10px] flex-shrink-0 ml-2 ${
+                              <span className={`${densityStyles.timeSize} flex-shrink-0 ml-2 ${
                                 chat.unreadCount > 0 ? "text-blue-600 font-semibold" : "text-gray-400 dark:text-zinc-500"
                               }`}>
                                 {formatChatTime(chat.latestMessage.createdAt)}
@@ -2107,7 +2908,7 @@ export default function ChatPage() {
                             )}
                           </div>
                           <div className="flex justify-between items-center mt-0.5">
-                            <p className="text-xs text-gray-500 dark:text-zinc-400 truncate pr-2">
+                            <p className={`${densityStyles.previewSize} text-gray-500 dark:text-zinc-400 truncate pr-2`}>
                               {getPreview(chat)}
                             </p>
                             {chat.unreadCount > 0 && (
@@ -2220,7 +3021,6 @@ export default function ChatPage() {
                       : (isOutgoing
                           ? (call.participants?.[0]?.name || "Unknown")
                           : (call.caller?.name || "Unknown"));
-                    const initials = name.charAt(0).toUpperCase();
 
                     const callTimeFormatted = formatChatTime(call.startedAt) + " • " + format(new Date(call.startedAt), "hh:mm a");
                     const durationStr = call.duration
@@ -2336,12 +3136,12 @@ export default function ChatPage() {
         {sidebarTab === "chats" && (
           <button
             onClick={openAiChat}
-            className="absolute bottom-18 right-4 z-20 flex items-center gap-2 px-3.5 py-2.5 rounded-full bg-white dark:bg-zinc-850 text-gray-900 dark:text-white shadow-xl shadow-black/10 dark:shadow-black/40 border border-gray-200 dark:border-zinc-700 hover:scale-105 active:scale-95 transition-all cursor-pointer group"
-            title="Chat with Zline AI"
-            aria-label="Chat with Zline AI"
+            className="absolute bottom-18 right-4 z-20 flex items-center gap-2 px-3.5 py-2.5 rounded-full bg-white dark:bg-zinc-855 text-gray-900 dark:text-white shadow-xl shadow-black/10 dark:shadow-black/40 border border-gray-200 dark:border-zinc-700 hover:scale-105 active:scale-95 transition-all cursor-pointer group"
+            title="Chat with Zino"
+            aria-label="Chat with Zino"
           >
             <AiIcon className="w-5 h-5 flex-shrink-0 animate-pulse" />
-            <span className="text-xs font-semibold tracking-wide">Zline AI</span>
+            <span className="text-xs font-semibold tracking-wide">Zino</span>
           </button>
         )}
 
@@ -2372,6 +3172,24 @@ export default function ChatPage() {
         </div>
       </div>
 
+      {/* Draggable Resizer Handle between Sidebar & Chat Area (Desktop only) */}
+      <div
+        onMouseDown={startResizing}
+        onDoubleClick={() => {
+          setSidebarWidth(360);
+          try {
+            localStorage.setItem("zline_sidebar_width", "360");
+            window.dispatchEvent(new CustomEvent("zline:chat_size_changed", { detail: { sidebarWidth: 360 } }));
+          } catch {}
+        }}
+        title="Drag to resize chat list • Double-click to reset (360px)"
+        className={`hidden md:flex flex-col justify-center items-center w-2 -mx-1 hover:w-2.5 active:w-2.5 transition-all cursor-col-resize select-none z-30 group relative shrink-0 ${
+          isResizing ? "bg-blue-600 shadow-[0_0_10px_rgba(37,99,235,0.7)]" : "bg-transparent hover:bg-blue-500/30 active:bg-blue-600"
+        }`}
+      >
+        <div className={`w-0.5 h-8 rounded-full transition-colors ${isResizing ? "bg-white" : "bg-gray-300 dark:bg-zinc-700 group-hover:bg-blue-500"}`} />
+      </div>
+
       {/* ===== MAIN CHAT AREA ===== */}
       {/* Mobile: full-screen when mobileView=="chat", hidden when mobileView=="sidebar" */}
       {/* Tablet+: fills remaining space beside the sidebar */}
@@ -2393,7 +3211,7 @@ export default function ChatPage() {
             <div className="w-16 h-16 rounded-full bg-blue-50/90 dark:bg-zinc-800/90 flex items-center justify-center text-blue-600 dark:text-blue-400 shadow-lg">
               <Paperclip className="w-8 h-8 animate-pulse" />
             </div>
-            <p className="text-blue-600 dark:text-blue-400 font-medium text-sm">Drop file here to send</p>
+            <p className="text-blue-600 dark:text-blue-400 font-medium text-sm">Drop files here to send (max 50MB total)</p>
           </div>
         )}
         {selectedChat ? (
@@ -2478,6 +3296,8 @@ export default function ChatPage() {
                       <RotateCcw className="h-3.5 w-3.5" />
                       <span className="hidden sm:inline">New Session</span>
                     </button>
+
+                    {renderSizeControlsPopover()}
                   </div>
                 </div>
               ) : localSearchMode ? (
@@ -2510,12 +3330,23 @@ export default function ChatPage() {
                       )}
                     </div>
                     <div>
-                      <h2 className="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-1.5">
-                        {selectedChat.chatName}
-                        {recipientPublicKey && (
-                          <span className="text-[10px] text-green-600 bg-green-50 dark:bg-green-950/20 px-1.5 py-0.5 rounded-md font-medium flex items-center gap-0.5" title="End-to-End Encrypted">
-                            🔒 E2EE
+                      <h2 className="text-sm font-semibold text-gray-900 dark:text-white flex items-center gap-1.5 flex-wrap">
+                        <span>{selectedChat.chatName}</span>
+                        {(recipientPublicKey || targetRecipientDevices.length > 0) && (
+                          <span className="text-[10px] text-green-600 bg-green-50 dark:bg-green-950/20 px-1.5 py-0.5 rounded-md font-medium flex items-center gap-0.5" title="End-to-End Encrypted (v3.0 Multi-Device)">
+                            🔒 E2EE v3.0
                           </span>
+                        )}
+                        {!selectedChat.isAi && (
+                          <button
+                            type="button"
+                            onClick={() => setShowTimerModal(true)}
+                            className="text-[10px] text-indigo-700 bg-indigo-50 hover:bg-indigo-100 dark:text-indigo-300 dark:bg-indigo-950/40 dark:hover:bg-indigo-950/70 px-1.5 py-0.5 rounded-md font-medium flex items-center gap-1 cursor-pointer transition-colors"
+                            title="Disappearing messages timer (click to configure)"
+                          >
+                            <Clock className="w-3 h-3" />
+                            <span>⏱️ {formatTimerLabel(selectedChat.disappearingTimer)}</span>
+                          </button>
                         )}
                       </h2>
                       {typingUser === selectedChat.otherUser?._id ? (
@@ -2611,6 +3442,40 @@ export default function ChatPage() {
                     >
                       <Search className="h-5 w-5" />
                     </button>
+                    {/* Catch Me Up (AI Briefing) */}
+                    {!selectedChat.isAi && messages.length >= 2 && (
+                      <button
+                        type="button"
+                        onClick={handleCatchMeUp}
+                        className="p-2 text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300 hover:bg-indigo-50 dark:hover:bg-indigo-950/40 rounded-lg transition-colors cursor-pointer"
+                        title="Catch Me Up — AI Conversation Summary & Action Items"
+                        aria-label="Catch Me Up AI Summary"
+                      >
+                        <Sparkles className="h-5 w-5" />
+                      </button>
+                    )}
+                    {/* Export Chat */}
+                    <button
+                      type="button"
+                      onClick={handleExportChat}
+                      className="p-2 text-gray-500 hover:text-blue-600 dark:text-zinc-400 dark:hover:text-blue-400 transition-colors cursor-pointer"
+                      title="Export Chat History (Download Decrypted Conversation)"
+                    >
+                      <Download className="h-5 w-5" />
+                    </button>
+                    {/* Disappearing Timer */}
+                    {!selectedChat.isAi && (
+                      <button
+                        type="button"
+                        onClick={() => setShowTimerModal(true)}
+                        className="p-2 text-gray-500 hover:text-indigo-600 dark:text-zinc-400 dark:hover:text-indigo-400 transition-colors cursor-pointer"
+                        title="Disappearing Messages Timer"
+                      >
+                        <Clock className="h-5 w-5" />
+                      </button>
+                    )}
+                    {/* Display & Sizing Popover */}
+                    {renderSizeControlsPopover()}
                   </div>
                 </div>
               )}
@@ -2704,7 +3569,7 @@ export default function ChatPage() {
                                 End poll
                               </button>
                             )}
-                            <span>{format(new Date(message.createdAt || Date.now()), "HH:mm")}</span>
+                            <span>{message.createdAt ? format(new Date(message.createdAt), "HH:mm") : ""}</span>
                           </div>
                         </div>
                       </div>
@@ -2781,6 +3646,7 @@ export default function ChatPage() {
                           onUnpin={handleUnpinMessage}
                           onStar={handleStarMessage}
                           onUnstar={handleUnstarMessage}
+                          onTranslate={handleTranslateMessage}
                           isPinned={selectedChat?.pinnedMessages?.includes(message._id) || false}
                           isStarred={starredMessageIds.includes(message._id)}
                           onClose={() => setActiveMessageActionId(null)}
@@ -2804,7 +3670,7 @@ export default function ChatPage() {
                         {message.isAi && (
                           <div className="flex items-center gap-1.5 px-4 pt-2.5 pb-0.5 text-[11px] font-semibold text-indigo-600 dark:text-indigo-400">
                             <AiIcon className="w-3.5 h-3.5" />
-                            <span>Zline AI</span>
+                            <span>Zino</span>
                           </div>
                         )}
 
@@ -2826,6 +3692,7 @@ export default function ChatPage() {
                         {/* Image */}
                         {message.type === "image" && message.fileUrl && !isExpired && (
                           <div className="relative">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
                             <img
                               src={message.fileUrl}
                               alt={message.fileName || "Image"}
@@ -2891,10 +3758,59 @@ export default function ChatPage() {
                         {(message.type === "text" || message.content) && (
                           <div className="px-4 py-2">
                             {message.isAi ? (
-                              <FormattedAiContent content={message.content} />
+                              <FormattedAiContent content={message.content} fontSize={chatFontSize} />
                             ) : (
-                              <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p>
+                              <p className={`${
+                                {
+                                  sm: "text-xs leading-relaxed",
+                                  md: "text-sm leading-relaxed",
+                                  lg: "text-base leading-relaxed",
+                                  xl: "text-lg leading-relaxed",
+                                }[chatFontSize] || "text-sm leading-relaxed"
+                              } whitespace-pre-wrap break-words`}>
+                                {renderTextWithLinks(message.content, isMe)}
+                              </p>
                             )}
+                          </div>
+                        )}
+
+                        {/* Rich OpenGraph Link Preview */}
+                        {!message.isAi && !isExpired && getFirstUrl(message.content) && (
+                          <div className="px-4 pb-2">
+                            <LinkPreviewCard url={getFirstUrl(message.content)!} isMe={isMe} />
+                          </div>
+                        )}
+
+                        {/* Inline AI Translation */}
+                        {translatedMessages[message._id] && (
+                          <div className="px-4 pb-2">
+                            <div className={`p-2.5 rounded-xl border text-xs ${
+                              isMe
+                                ? "bg-blue-700/40 border-blue-400/30 text-white"
+                                : "bg-indigo-50/70 dark:bg-indigo-950/40 border-indigo-200 dark:border-indigo-800/60 text-gray-900 dark:text-zinc-100"
+                            }`}>
+                              <div className="flex items-center justify-between text-[10px] font-semibold opacity-80 mb-1">
+                                <span className="flex items-center gap-1 text-indigo-600 dark:text-indigo-400">
+                                  <Languages className="w-3 h-3" />
+                                  AI Translation
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleTranslateMessage(message)}
+                                  className="hover:underline opacity-70 cursor-pointer"
+                                >
+                                  Dismiss
+                                </button>
+                              </div>
+                              {translatedMessages[message._id].loading ? (
+                                <div className="flex items-center gap-2 py-1 text-gray-500">
+                                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                                  <span>Translating with Zino...</span>
+                                </div>
+                              ) : (
+                                <p className="whitespace-pre-wrap">{translatedMessages[message._id].text}</p>
+                              )}
+                            </div>
                           </div>
                         )}
 
@@ -2921,7 +3837,7 @@ export default function ChatPage() {
                             {selectedChat.pinnedMessages?.includes(message._id) && (
                               <Pin className="w-3 h-3 text-orange-500 mr-0.5 rotate-45" />
                             )}
-                            <span>{format(new Date(message.createdAt || Date.now()), "HH:mm")}</span>
+                            <span>{message.createdAt ? format(new Date(message.createdAt), "HH:mm") : ""}</span>
                             {message.isEdited && <span className="italic">edited</span>}
                             {isMe && (() => {
                               const readEntry = message.readBy?.find((r: any) => {
@@ -2991,7 +3907,7 @@ export default function ChatPage() {
                           : aiSearchStatus.stage === "analyzing"
                           ? `Analyzing research (${aiSearchStatus.sourceCount || "retrieved"} sources)...`
                           : aiSearchStatus.stage === "reasoning"
-                          ? "Nemotron is reasoning..."
+                          ? "Zino is reasoning..."
                           : "Generating response..."}
                       </span>
                       <span className="text-[10px] text-gray-400 dark:text-zinc-500 truncate max-w-xs">
@@ -3007,7 +3923,7 @@ export default function ChatPage() {
                           ? "Synthesizing evidence and citations"
                           : aiSearchStatus.stage === "reasoning"
                           ? "Evaluating logic and formulating response"
-                          : "Fast, intelligent answer powered by NVIDIA Nemotron"}
+                          : "Fast, intelligent answer powered by Zino"}
                       </span>
                     </div>
                   </div>
@@ -3018,10 +3934,11 @@ export default function ChatPage() {
                   <p className="text-xs text-gray-400 dark:text-zinc-500 font-medium">Suggested questions to try:</p>
                   <div className="flex flex-wrap gap-2">
                     {[
-                      "What is the latest Next.js and React release?",
+                      "How does Zline's v3.0 multi-device encryption work?",
+                      "How do I link a new phone or laptop?",
+                      "How do I resize the chat list and adjust font size?",
                       "Which number is larger, 9.11 or 9.8?",
-                      "Who won the most recent Ballon d'Or?",
-                      "How does Zline's 2048-bit RSA + AES-256 E2EE work?",
+                      "How do disappearing messages and voice notes work in Zline?",
                     ].map((prompt, pIdx) => (
                       <button
                         key={pIdx}
@@ -3049,64 +3966,133 @@ export default function ChatPage() {
                 </div>
               )}
 
-              {/* File Upload Progress */}
+              {/* Multi-File Upload Progress */}
               {uploadProgress !== null && (
-                <div className="mb-2 bg-white dark:bg-zinc-900 rounded-xl p-3 border border-gray-200 dark:border-zinc-700">
-                  <div className="flex items-center justify-between text-xs text-gray-600 dark:text-zinc-400 mb-1">
-                    <span>Uploading {pendingFile?.name || "file"}...</span>
-                    <span>{uploadProgress}%</span>
+                <div className="mb-2 bg-white dark:bg-zinc-900 rounded-xl p-3 border border-gray-200 dark:border-zinc-700 shadow-sm animate-in fade-in">
+                  <div className="flex items-center justify-between text-xs text-gray-700 dark:text-zinc-300 font-medium mb-1.5">
+                    <span className="flex items-center gap-1.5">
+                      <Loader2 className="w-3.5 h-3.5 animate-spin text-blue-600" />
+                      Uploading file {uploadProgress.current} of {uploadProgress.total}...
+                    </span>
+                    <span className="font-semibold text-blue-600 dark:text-blue-400">{uploadProgress.percent}%</span>
                   </div>
-                  <div className="w-full bg-gray-200 dark:bg-zinc-800 rounded-full h-1.5 overflow-hidden">
+                  <div className="w-full bg-gray-100 dark:bg-zinc-800 rounded-full h-1.5 overflow-hidden">
                     <div 
-                      className="bg-blue-600 h-full transition-all duration-300"
-                      style={{ width: `${uploadProgress}%` }}
+                      className="bg-blue-600 h-full transition-all duration-300 rounded-full"
+                      style={{ width: `${uploadProgress.percent}%` }}
                     />
                   </div>
                 </div>
               )}
 
-              {/* Pending File Preview / Send Confirmation */}
-              {pendingFile && uploadProgress === null && (
-                <div className="mb-2 bg-white dark:bg-zinc-900 rounded-2xl p-3 shadow border border-gray-200 dark:border-zinc-700 flex items-center gap-3 relative animate-in slide-in-from-bottom duration-200">
-                  {pendingFilePreview ? (
-                    <img 
-                      src={pendingFilePreview} 
-                      alt="Preview" 
-                      className="w-12 h-12 rounded-lg object-cover"
-                    />
-                  ) : (
-                    <div className="w-12 h-12 rounded-lg bg-gray-100 dark:bg-zinc-800 flex items-center justify-center flex-shrink-0">
-                      <FileText className="w-6 h-6 text-blue-500" />
+              {/* Multi-File Pending Preview / Send Confirmation */}
+              {pendingFiles.length > 0 && uploadProgress === null && (() => {
+                const totalBytes = pendingFiles.reduce((acc, p) => acc + p.file.size, 0);
+                const totalMb = (totalBytes / (1024 * 1024)).toFixed(2);
+                const maxMb = 50;
+                const isNearLimit = totalBytes > 40 * 1024 * 1024;
+
+                return (
+                  <div className="mb-2 bg-white dark:bg-zinc-900 rounded-2xl p-3 shadow-md border border-gray-200 dark:border-zinc-800 relative animate-in slide-in-from-bottom-2 duration-200">
+                    {/* Header bar: Count, total size, add more, clear all */}
+                    <div className="flex items-center justify-between pb-2 mb-2 border-b border-gray-100 dark:border-zinc-800 text-xs">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-gray-800 dark:text-zinc-100 flex items-center gap-1.5">
+                          <Paperclip className="w-3.5 h-3.5 text-blue-500" />
+                          {pendingFiles.length} {pendingFiles.length === 1 ? "file selected" : "files selected"}
+                        </span>
+                        <span className={`text-[11px] px-2 py-0.5 rounded-full font-medium ${
+                          isNearLimit 
+                            ? "bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300"
+                            : "bg-blue-50 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300"
+                        }`}>
+                          {totalMb} MB / {maxMb} MB
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-2.5">
+                        <button
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          className="flex items-center gap-1 text-[11px] font-medium text-blue-600 dark:text-blue-400 hover:underline cursor-pointer"
+                          title="Add more files"
+                        >
+                          <Plus className="w-3.5 h-3.5" /> Add more
+                        </button>
+                        <button
+                          type="button"
+                          onClick={clearPendingFiles}
+                          className="text-[11px] text-gray-400 hover:text-red-500 transition-colors cursor-pointer"
+                          title="Remove all files"
+                        >
+                          Clear all
+                        </button>
+                      </div>
                     </div>
-                  )}
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-semibold truncate text-gray-900 dark:text-white">{pendingFile.name}</p>
-                    <p className="text-[10px] text-gray-500 dark:text-zinc-400">
-                      {(pendingFile.size / (1024 * 1024)).toFixed(2)} MB
-                    </p>
+
+                    {/* Horizontal Scroll of File Cards */}
+                    <div className="flex items-center gap-2 overflow-x-auto pb-1 max-h-[110px] scrollbar-thin">
+                      {pendingFiles.map((item) => {
+                        const isImg = item.file.type.startsWith("image/");
+                        const sizeStr = item.file.size > 1024 * 1024
+                          ? `${(item.file.size / (1024 * 1024)).toFixed(1)} MB`
+                          : `${Math.round(item.file.size / 1024)} KB`;
+
+                        return (
+                          <div
+                            key={item.id}
+                            className="relative flex-shrink-0 flex items-center gap-2 p-2 bg-gray-50 dark:bg-zinc-800/80 rounded-xl border border-gray-200/80 dark:border-zinc-700/60 max-w-[210px] group"
+                          >
+                            {isImg && item.previewUrl ? (
+                              /* eslint-disable-next-line @next/next/no-img-element */
+                              <img
+                                src={item.previewUrl}
+                                alt={item.file.name}
+                                className="w-10 h-10 rounded-lg object-cover flex-shrink-0"
+                              />
+                            ) : (
+                              <div className="w-10 h-10 rounded-lg bg-blue-50 dark:bg-blue-950/80 text-blue-600 dark:text-blue-400 flex items-center justify-center flex-shrink-0">
+                                {getFileIcon(item.file.name)}
+                              </div>
+                            )}
+                            <div className="min-w-0 flex-1">
+                              <p className="text-xs font-medium text-gray-800 dark:text-zinc-200 truncate" title={item.file.name}>
+                                {item.file.name}
+                              </p>
+                              <p className="text-[10px] text-gray-400 dark:text-zinc-500">
+                                {sizeStr}
+                              </p>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => removePendingFile(item.id)}
+                              className="w-5 h-5 rounded-full bg-black/60 text-white flex items-center justify-center hover:bg-red-500 transition-colors flex-shrink-0 cursor-pointer"
+                              title={`Remove ${item.file.name}`}
+                            >
+                              <X className="w-3 h-3" />
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Send All Action Footer */}
+                    <div className="flex items-center justify-between pt-2 mt-2 border-t border-gray-100 dark:border-zinc-800">
+                      <span className="text-[11px] text-gray-500 dark:text-zinc-400 truncate">
+                        Add optional caption in text box below
+                      </span>
+                      <button
+                        type="button"
+                        onClick={uploadAndSendPendingFiles}
+                        className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-full text-xs font-semibold transition-colors flex items-center gap-1.5 shadow-sm cursor-pointer"
+                      >
+                        <Send className="w-3 h-3" />
+                        Send All ({pendingFiles.length})
+                      </button>
+                    </div>
                   </div>
-                  <div className="flex items-center gap-2">
-                    <button 
-                      onClick={() => {
-                        if (pendingFilePreview) URL.revokeObjectURL(pendingFilePreview);
-                        setPendingFile(null);
-                        setPendingFilePreview(null);
-                      }}
-                      className="p-1.5 hover:bg-gray-100 dark:hover:bg-zinc-800 rounded-full text-gray-400 hover:text-red-500 transition-colors"
-                      title="Cancel"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                    <button 
-                      onClick={uploadAndSendPendingFile}
-                      className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-full text-xs font-semibold transition-colors flex items-center gap-1.5"
-                      title="Send file"
-                    >
-                      <Send className="w-3 h-3" /> Send
-                    </button>
-                  </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* Poll creation form */}
               {showPollForm && (
@@ -3199,17 +4185,28 @@ export default function ChatPage() {
                 </div>
               ) : (
                 <div className="relative">
+                  {/* Hidden file input (supports multiple files, max 50MB per selection) */}
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    className="hidden"
+                    onChange={handleFileUpload}
+                  />
+
                   {showAttachMenu && (
                     <div className="absolute bottom-14 left-0 bg-white dark:bg-zinc-900 rounded-2xl shadow-xl border border-gray-200 dark:border-zinc-700 py-2 z-10 min-w-[160px]">
                       <button
+                        type="button"
                         onClick={() => { setShowAttachMenu(false); fileInputRef.current?.click(); }}
-                        className="w-full flex items-center gap-3 px-4 py-3 text-sm hover:bg-gray-50 dark:hover:bg-zinc-800 text-gray-700 dark:text-zinc-200"
+                        className="w-full flex items-center gap-3 px-4 py-3 text-sm hover:bg-gray-50 dark:hover:bg-zinc-800 text-gray-700 dark:text-zinc-200 cursor-pointer"
                       >
-                        <Paperclip className="w-4 h-4 text-blue-500" /> Attach File
+                        <Paperclip className="w-4 h-4 text-blue-500" /> Attach File(s)
                       </button>
                       <button
+                        type="button"
                         onClick={() => { setShowAttachMenu(false); setShowPollForm(true); }}
-                        className="w-full flex items-center gap-3 px-4 py-3 text-sm hover:bg-gray-50 dark:hover:bg-zinc-800 text-gray-700 dark:text-zinc-200"
+                        className="w-full flex items-center gap-3 px-4 py-3 text-sm hover:bg-gray-50 dark:hover:bg-zinc-800 text-gray-700 dark:text-zinc-200 cursor-pointer"
                       >
                         <BarChart2 className="w-4 h-4 text-purple-500" /> Create Poll
                       </button>
@@ -3221,7 +4218,7 @@ export default function ChatPage() {
                       type="button"
                       disabled={selectedChat?.isAi || isUploading}
                       onClick={() => setShowAttachMenu(!showAttachMenu)}
-                      className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0 ${
+                      className={`w-9 h-9 flex items-center justify-center rounded-full transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0 cursor-pointer ${
                         showAttachMenu ? "bg-blue-600 text-white" : "text-gray-500 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-zinc-800"
                       }`}
                       title={selectedChat?.isAi ? "Attachments disabled with AI assistant" : "Attach / Poll"}
@@ -3233,25 +4230,25 @@ export default function ChatPage() {
                       type="text"
                       value={newMessage}
                       onChange={handleTyping}
-                      placeholder={selectedChat?.isAi ? "Ask Zline AI anything..." : "Type a message..."}
+                      placeholder={selectedChat?.isAi ? "Ask Zino anything..." : pendingFiles.length > 0 ? "Add a caption (optional)..." : "Type a message..."}
                       className="flex-1 bg-transparent border-none focus:ring-0 text-base md:text-sm px-2 dark:text-white outline-none"
                     />
 
                     {/* Custom Voice Recorder */}
-                    {!selectedChat?.isAi && (
+                    {!selectedChat?.isAi && pendingFiles.length === 0 && (
                       <VoiceRecorder
                         onSend={handleVoiceSend}
                         disabled={isUploading}
                       />
                     )}
 
-                    {/* Send text */}
+                    {/* Send text or pending file */}
                     <button
                       type="submit"
-                      disabled={!newMessage.trim() || isUploading}
-                      className="w-9 h-9 flex items-center justify-center rounded-full bg-blue-600 text-white hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0"
+                      disabled={(!newMessage.trim() && pendingFiles.length === 0) || isUploading}
+                      className="w-9 h-9 flex items-center justify-center rounded-full bg-blue-600 text-white hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex-shrink-0 cursor-pointer"
                     >
-                      <Send className="w-4 h-4 ml-0.5" />
+                      {isUploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Send className="w-4 h-4 ml-0.5" />}
                     </button>
                   </form>
                 </div>
@@ -3268,13 +4265,6 @@ export default function ChatPage() {
             <p className="text-gray-500 max-w-sm dark:text-zinc-400">
               Select a chat or search for a user to start messaging.
             </p>
-            <button
-              onClick={openAiChat}
-              className="mt-6 inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-purple-600 text-white text-sm font-medium hover:from-indigo-700 hover:to-purple-700 shadow-md hover:shadow-lg transition-all cursor-pointer"
-            >
-              <AiIcon className="w-4 h-4" />
-              Chat with Zline AI
-            </button>
           </div>
         )}
       </div>
@@ -3295,6 +4285,177 @@ export default function ChatPage() {
           currentUserId={session.user.id}
           currentUserName={session.user.name || "User"}
         />
+      )}
+
+      {/* ── Disappearing Messages Timer Modal ── */}
+      {showTimerModal && selectedChat && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs">
+          <div className="relative w-[calc(100%-2rem)] max-w-md bg-white dark:bg-zinc-900 rounded-3xl p-6 shadow-2xl m-4 animate-in fade-in zoom-in-95 duration-200">
+            <button 
+              onClick={() => setShowTimerModal(false)}
+              className="absolute top-4 right-4 p-1 rounded-full hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-400 hover:text-gray-600 dark:hover:text-zinc-200 transition-colors cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <div className="flex items-center gap-3 mb-2">
+              <div className="w-10 h-10 rounded-2xl bg-indigo-50 dark:bg-indigo-950/50 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+                <Clock className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-gray-900 dark:text-white">
+                  Disappearing Messages
+                </h3>
+                <p className="text-xs text-gray-500 dark:text-zinc-400">
+                  {selectedChat.chatName}
+                </p>
+              </div>
+            </div>
+
+            <p className="text-xs text-gray-500 dark:text-zinc-400 my-3 leading-relaxed">
+              New messages in this chat will vanish after the selected duration to protect privacy and save server storage. You can export the chat before expiry. Maximum retention is 7 days.
+            </p>
+
+            <div className="space-y-2 my-4">
+              {TIMER_OPTIONS.map((opt) => {
+                const isSelected = (selectedChat.disappearingTimer || 604800) === opt.seconds;
+                return (
+                  <button
+                    key={opt.seconds}
+                    disabled={timerLoading}
+                    onClick={() => handleSetDisappearingTimer(opt.seconds)}
+                    className={`w-full flex items-center justify-between p-3 rounded-2xl border text-left transition-all cursor-pointer ${
+                      isSelected
+                        ? "border-blue-600 bg-blue-50/50 dark:bg-blue-950/20 text-gray-900 dark:text-white ring-1 ring-blue-600"
+                        : "border-gray-200 dark:border-zinc-800 hover:bg-gray-50 dark:hover:bg-zinc-800/60 text-gray-700 dark:text-zinc-300"
+                    }`}
+                  >
+                    <div>
+                      <p className="text-sm font-semibold flex items-center gap-2">
+                        {opt.label}
+                        {opt.seconds === 604800 && (
+                          <span className="text-[10px] bg-gray-100 dark:bg-zinc-800 text-gray-500 px-1.5 py-0.5 rounded font-normal">
+                            Max (Default)
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-[11px] text-gray-500 dark:text-zinc-400">{opt.description}</p>
+                    </div>
+                    <div className={`w-5 h-5 rounded-full border flex items-center justify-center transition-colors ${
+                      isSelected ? "bg-blue-600 border-blue-600 text-white" : "border-gray-300 dark:border-zinc-600"
+                    }`}>
+                      {isSelected && <Check className="w-3 h-3" />}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div className="pt-2 flex justify-between items-center border-t border-gray-100 dark:border-zinc-800">
+              <button
+                type="button"
+                onClick={() => {
+                  setShowTimerModal(false);
+                  handleExportChat();
+                }}
+                className="text-xs text-blue-600 dark:text-blue-400 hover:underline flex items-center gap-1 font-medium cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" /> Export chat now
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowTimerModal(false)}
+                className="px-4 py-1.5 bg-gray-100 hover:bg-gray-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-gray-700 dark:text-zinc-200 rounded-full text-xs font-semibold transition-colors cursor-pointer"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Catch Me Up AI Briefing Modal ── */}
+      {showCatchMeUpModal && (
+        <div className="fixed inset-0 z-50 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="relative w-full max-w-lg bg-white dark:bg-zinc-900 border border-gray-200 dark:border-zinc-800 rounded-3xl p-6 shadow-2xl flex flex-col max-h-[85vh] animate-in fade-in zoom-in-95 duration-200">
+            <button
+              onClick={() => setShowCatchMeUpModal(false)}
+              className="absolute top-4 right-4 p-1 rounded-full hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-400 hover:text-gray-600 dark:hover:text-zinc-200 transition-colors cursor-pointer"
+              aria-label="Close"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 rounded-2xl bg-indigo-500/10 dark:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 flex items-center justify-center">
+                <Sparkles className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white flex items-center gap-2">
+                  Catch Me Up
+                </h3>
+                <p className="text-xs text-gray-500 dark:text-zinc-400">
+                  AI Briefing for {selectedChat?.chatName || "Conversation"}
+                </p>
+              </div>
+            </div>
+
+            <div className="overflow-y-auto flex-1 pr-1 space-y-3 min-h-[160px]">
+              {catchMeUpLoading ? (
+                <div className="py-12 flex flex-col items-center justify-center text-center space-y-3">
+                  <Loader2 className="w-8 h-8 text-indigo-600 dark:text-indigo-400 animate-spin" />
+                  <p className="text-sm font-semibold text-gray-800 dark:text-zinc-200">
+                    Zino is reading decrypted messages...
+                  </p>
+                  <p className="text-xs text-gray-400 max-w-xs">
+                    Extracting key decisions, highlights, and action items with client-side zero-knowledge privacy.
+                  </p>
+                </div>
+              ) : (
+                <div className="text-sm text-gray-800 dark:text-zinc-200 leading-relaxed">
+                  <FormattedAiContent content={catchMeUpSummary} fontSize={chatFontSize} />
+                </div>
+              )}
+            </div>
+
+            <div className="pt-4 mt-4 border-t border-gray-100 dark:border-zinc-800 flex items-center justify-between">
+              <p className="text-[11px] text-gray-400">
+                ⚡ Powered by Zino AI
+              </p>
+              <div className="flex items-center gap-2">
+                {catchMeUpSummary && !catchMeUpLoading && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigator.clipboard.writeText(catchMeUpSummary);
+                      setCatchMeUpCopied(true);
+                      setTimeout(() => setCatchMeUpCopied(false), 2000);
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-gray-100 dark:hover:bg-zinc-700 text-gray-700 dark:text-zinc-200 transition-colors cursor-pointer"
+                  >
+                    {catchMeUpCopied ? (
+                      <>
+                        <CheckCircle2 className="w-3.5 h-3.5 text-green-500" />
+                        <span>Copied!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3.5 h-3.5" />
+                        <span>Copy Briefing</span>
+                      </>
+                    )}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setShowCatchMeUpModal(false)}
+                  className="px-4 py-1.5 bg-gray-900 hover:bg-black text-white dark:bg-white dark:text-black dark:hover:bg-zinc-200 rounded-full text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  Done
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* ── Create Group Modal ── */}
@@ -3318,10 +4479,12 @@ export default function ChatPage() {
                 </label>
                 <input 
                   type="text"
+                  autoComplete="off"
                   placeholder="Enter group name..."
                   value={groupNameInput}
                   onChange={(e) => setGroupNameInput(e.target.value)}
-                  className="w-full text-sm border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-800 rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-blue-500 text-gray-900 dark:text-white placeholder-gray-400 dark:placeholder-zinc-500 transition-colors"
+                  className="w-full text-sm border border-gray-200 dark:border-zinc-700 bg-gray-50 dark:bg-zinc-800 rounded-xl px-4 py-2.5 outline-none focus:ring-2 focus:ring-blue-500 placeholder-gray-400 dark:placeholder-zinc-500 transition-colors"
+                  style={{ color: resolvedTheme === 'dark' ? '#ffffff' : '#111827' }}
                 />
               </div>
 
@@ -3429,7 +4592,7 @@ export default function ChatPage() {
           fetch("/api/users/settings")
             .then((res) => (res.ok ? res.json() : null))
             .then((data) => {
-              if (data?.settings) setUserSettings(data.settings);
+              if (data?.settings?.theme) setTheme(data.settings.theme);
             });
         }}
         session={session}

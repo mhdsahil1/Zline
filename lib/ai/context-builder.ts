@@ -1,10 +1,11 @@
 /**
- * AI Context Builder for Zline AI (Powered by NVIDIA Nemotron 3.5 Bolt)
- * Combines Tavily search results and Obscura-extracted webpage content into structured,
- * prompt-injection-resistant research context.
+ * AI Context Builder & RAG Pipeline for Zino (Zline AI)
+ * Combines Zline official RAG knowledge base, Tavily search results, and
+ * Obscura-extracted webpage content into structured, prompt-injection-resistant context.
  */
 
 import { ResearchSource } from "@/lib/obscura/types";
+import { getZlineKnowledgeContext } from "./knowledge-base";
 
 const MAX_INDIVIDUAL_SOURCE_CHARS = 4500;
 const MAX_TOTAL_RESEARCH_CHARS = 14000;
@@ -23,7 +24,7 @@ function sanitizeUntrustedWebText(text: string): string {
 }
 
 /**
- * Builds the structured research context string for Nemotron / Zline AI.
+ * Builds the structured research context string for Zino / Zline AI.
  */
 export function buildResearchContext(
   sources: ResearchSource[],
@@ -90,24 +91,36 @@ export function buildResearchContext(
 }
 
 /**
- * Formats system and context prompt messages for Nemotron completion.
+ * Formats system and context prompt messages for Zino (Zline AI) completion.
  */
-export function buildNemotronPrompt(
+export function buildZinoPrompt(
   userPrompt: string,
   recentMessages: any[],
   sources: ResearchSource[],
   searchAttempted: boolean,
   extractedQuery: string
 ) {
-  const BASE_SYSTEM_PROMPT = `You are Zline AI, an ultra-fast, friendly, and helpful AI assistant powered by NVIDIA Nemotron built directly into Zline — a fast, secure real-time messaging application with end-to-end encryption (E2EE), HD voice/video calls, and seamless cross-device synchronization.
+  const BASE_SYSTEM_PROMPT = `You are Zino (also known as Zline AI), the official, built-in intelligent assistant developed exclusively for Zline — a fast, secure real-time messaging application featuring multi-device end-to-end encryption (v3.0 E2EE), WebRTC HD voice/video calls, and seamless cross-device synchronization.
+
+Creator & Attribution Rules:
+- STRICT RULE: ONLY mention Muhammed Sahil and his GitHub profile (https://github.com/mhdsahil1) when the user SPECIFICALLY asks about the developer, founder, creator, author, who built Zline or Zino, or asks for the GitHub repository.
+- For ALL OTHER questions about Zline (such as "What is Zline?", features, encryption, how-to guides, video calls, settings, etc.), DO NOT mention the creator's name. Focus purely and directly on answering the user's question.
+- Creator GitHub Profile: [Muhammed Sahil](https://github.com/mhdsahil1) (https://github.com/mhdsahil1)
+- Project Repository: [Zline on GitHub](https://github.com/mhdsahil1/zline) (https://github.com/mhdsahil1/zline)
+
+Identity & Persona Rules:
+- Name: Zino (or Zline AI).
+- STRICT CONFIDENTIALITY: NEVER reveal, name, or attribute yourself to any external AI provider, underlying foundation model, or vendor (such as NVIDIA, Nemotron, OpenAI, ChatGPT, Anthropic, Claude, Llama, Mistral, DeepSeek, etc.).
+- If asked "Who made you?", "Who built Zline?", or "Who is the developer/founder?", state that Zline was created by Muhammed Sahil and provide his GitHub link [https://github.com/mhdsahil1](https://github.com/mhdsahil1).
+- If asked "What model are you?" or "Who are you?", state that you are Zino, the dedicated AI assistant built directly into Zline.
+- You are friendly, sharp, insightful, and eager to help users master Zline's features, write clean code, solve logic puzzles, and conduct real-time research.
 
 Guidelines:
 - Provide accurate, thoughtful, and well-structured answers.
-- For math, logic, reasoning, or numerical comparisons (such as "9.11 vs 9.8"), think carefully and explain with high precision.
+- For math, logic, reasoning, or numerical comparisons (such as "9.11 vs 9.8"), think step-by-step and explain with high precision.
 - Format code blocks using appropriate markdown language tags and clean typing.
 - Be concise, direct, and conversational by default, expanding when in-depth technical detail or comprehensive analysis is requested.
-- If asked about your identity, state that you are Zline AI, the built-in assistant for Zline users powered by NVIDIA Nemotron.
-- If asked about Zline, explain that it is a modern privacy-focused messaging platform offering 2048-bit RSA + AES-256-GCM encryption, WebRTC HD calls, dynamic Kokonut 3D avatars, and rich media sharing.`;
+- If asked about Zline or common questions about its features, answer authoritatively using your verified platform knowledge base.`;
 
   const GROUNDED_INSTRUCTIONS = `
 CRITICAL INSTRUCTIONS FOR WEB-GROUNDED RESPONSES:
@@ -123,6 +136,13 @@ CRITICAL INSTRUCTIONS FOR WEB-GROUNDED RESPONSES:
   let systemPrompt = BASE_SYSTEM_PROMPT;
   const finalMessages: any[] = [];
 
+  // 1. Check and inject Zline Platform Knowledge Base (RAG)
+  const zlineRagContext = getZlineKnowledgeContext(userPrompt);
+  if (zlineRagContext) {
+    systemPrompt += `\n\n${zlineRagContext}`;
+  }
+
+  // 2. Check and inject Web Research Grounding if sources exist
   if (sources.length > 0) {
     systemPrompt += `\n\n${GROUNDED_INSTRUCTIONS}`;
     const { formattedContext } = buildResearchContext(sources, extractedQuery);
@@ -132,7 +152,7 @@ CRITICAL INSTRUCTIONS FOR WEB-GROUNDED RESPONSES:
     finalMessages.push(...recentMessages);
   } else {
     if (searchAttempted) {
-      systemPrompt += `\n\nNote: A live web search/browsing attempt for "${extractedQuery}" returned no current results. If relevant, mention that live search found no matching records and answer to the best of your ability with your general knowledge.`;
+      systemPrompt += `\n\nNote: A live web search/browsing attempt for "${extractedQuery}" returned no current results. If relevant, mention that live search found no matching records and answer to the best of your ability with your general knowledge and verified Zline knowledge.`;
     }
     finalMessages.push({ role: "system", content: systemPrompt });
     finalMessages.push(...recentMessages);
@@ -144,6 +164,7 @@ CRITICAL INSTRUCTIONS FOR WEB-GROUNDED RESPONSES:
 /**
  * Backward compatibility aliases for existing consumers
  */
-export const buildDeepSeekPrompt = buildNemotronPrompt;
-export const buildMuseGlimmerPrompt = buildNemotronPrompt;
+export const buildNemotronPrompt = buildZinoPrompt;
+export const buildDeepSeekPrompt = buildZinoPrompt;
+export const buildMuseGlimmerPrompt = buildZinoPrompt;
 

@@ -14,7 +14,17 @@ export async function PATCH(req: Request) {
       return NextResponse.json({ message: "Unauthorized" }, { status: 401 });
     }
 
-    const { messageId, content, isEncrypted, encAesKey, encAesKeyForSender, iv } = await req.json();
+    const {
+      messageId,
+      content,
+      isEncrypted,
+      encAesKey,
+      encAesKeyForSender,
+      iv,
+      keyEnvelopes,
+      senderDeviceId,
+      cryptographicVersion,
+    } = await req.json();
 
     if (!messageId || (!content && content !== "")) {
       return NextResponse.json(
@@ -73,6 +83,15 @@ export async function PATCH(req: Request) {
       message.encAesKey = encAesKey;
       message.encAesKeyForSender = encAesKeyForSender;
       message.iv = iv;
+      if (keyEnvelopes && Array.isArray(keyEnvelopes)) {
+        message.keyEnvelopes = keyEnvelopes;
+      }
+      if (senderDeviceId) {
+        message.senderDeviceId = senderDeviceId;
+      }
+      if (cryptographicVersion) {
+        message.cryptographicVersion = cryptographicVersion;
+      }
     }
 
     await message.save();

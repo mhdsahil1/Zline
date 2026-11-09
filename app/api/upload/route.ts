@@ -2,7 +2,7 @@ import { NextResponse } from "next/dist/server/web/spec-extension/response";
 import { getServerSession } from "next-auth";
 import { authOptions } from "@/lib/auth";
 
-const MAX_FILE_BYTES = 100 * 1024 * 1024; // 100MB single file limit
+const MAX_FILE_BYTES = 50 * 1024 * 1024; // 50MB limit
 
 export async function POST(req: Request) {
   try {
@@ -20,7 +20,7 @@ export async function POST(req: Request) {
 
     if (file.size > MAX_FILE_BYTES) {
       return NextResponse.json(
-        { message: `File too large. Maximum size is 100MB (your file: ${(file.size / (1024 * 1024)).toFixed(1)}MB).` },
+        { message: `File too large. Maximum size is 50MB (your file: ${(file.size / (1024 * 1024)).toFixed(1)}MB).` },
         { status: 413 }
       );
     }
