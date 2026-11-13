@@ -90,7 +90,7 @@ export const metadata: Metadata = {
   verification: {
     google:
       process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION ||
-      "JsoaOBoQzDSJ-1K3FdrT5jesFu2Hkv7moNGY8kaQVnk",
+      "googlea35067fe8286b402",
   },
   icons: {
     icon: [
